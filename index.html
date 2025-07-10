@@ -3,433 +3,1485 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>データ解析ダッシュボード</title>
+    <title>施設売上分析ダッシュボード</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/moment.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.0/dist/chartjs-adapter-moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f4f4f4;
-            color: #333;
+            font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
+            background-color: #f0f4f8;
         }
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        .card {
+            background-color: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
         }
-        h1 {
-            color: #0056b3;
-            text-align: center;
-            margin-bottom: 30px;
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
         }
-        .input-section, .chart-section, .analysis-options {
-            margin-bottom: 20px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            background-color: #fdfdfd;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-        input[type="file"], select {
-            display: block;
-            margin-bottom: 15px;
-            padding: 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            width: calc(100% - 18px); /* paddingとborder分を考慮 */
-        }
-        button {
-            background-color: #007bff;
+        .btn-primary {
+            background-color: #3b82f6;
             color: white;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: background-color 0.3s ease;
-            margin-right: 10px;
+            transition: background-color 0.2s;
         }
-        button:hover {
-            background-color: #0056b3;
-        }
-        .message {
-            margin-top: 15px;
-            padding: 10px;
-            border-radius: 5px;
-            font-weight: bold;
-            display: none; /* 初期状態では非表示 */
-        }
-        .message.success {
-            background-color: #d4edda;
-            color: #155724;
-            border-color: #c3e6cb;
-        }
-        .message.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border-color: #f5c6cb;
-        }
-        canvas {
-            display: block;
-            max-width: 100%;
-            height: auto;
-            margin-top: 20px;
+        .btn-primary:hover {
+            background-color: #2563eb;
         }
         .chart-container {
             position: relative;
-            height: 400px; /* グラフの高さを固定 */
+            height: 300px;
             width: 100%;
         }
-        .analysis-options label, .analysis-options select {
-            display: inline-block;
-            width: auto;
-            margin-right: 15px;
+        .chart-container-large {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
+            color: white;
+        }
+        .summary-card-alt {
+            background: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+            color: white;
+        }
+        .weekday-0 { background-color: rgba(239, 68, 68, 0.1); }
+        .weekday-6 { background-color: rgba(59, 130, 246, 0.1); }
+        textarea {
+            resize: none;
+        }
+        #shareModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            max-width: 90%;
+            width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>CSV / Excel データ解析ダッシュボード</h1>
-
-        <div class="input-section">
-            <label for="fileInput">CSVまたはExcelファイルを選択:</label>
-            <input type="file" id="fileInput" accept=".csv, .xlsx, .xls">
-            <button id="analyzeButton">データを読み込む</button>
-            <div id="message" class="message"></div>
-        </div>
-
-        <div class="analysis-options" style="display: none;"> <h2>解析オプション</h2>
-            <label for="dataColumnSelect">解析項目:</label>
-            <select id="dataColumnSelect"></select>
-
-            <label for="analysisTypeSelect">解析タイプ:</label>
-            <select id="analysisTypeSelect">
-                <option value="monthly">月ごとの合計</option>
-                <option value="daily">日ごとの推移</option>
-                <option value="weekly">曜日ごとの平均</option>
-            </select>
-            <button id="performAnalysisButton">解析を実行</button>
-        </div>
-
-        <div class="chart-section">
-            <h2>解析結果</h2>
-            <div class="chart-container">
-                <canvas id="myChart"></canvas>
+    <div class="min-h-screen p-4 md:p-8">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">施設売上分析ダッシュボード</h1>
+                <p class="text-gray-600 mt-2">日別データから自動生成されたインタラクティブな分析ツール</p>
             </div>
-            <p>※グラフは選択された項目と解析タイプに基づいて表示されます。</p>
+            <div id="dataInputSection">
+                <button id="shareBtn" class="btn-primary px-4 py-2 rounded-md">分析結果を共有</button>
+            </div>
+        </header>
+
+        <div class="mb-8" id="inputSection">
+            <div class="card p-4 md:p-6">
+                <h2 class="text-xl font-semibold mb-4">データを入力</h2>
+                <p class="text-gray-600 mb-4">以下のテキストエリアにデータを貼り付けてください。<br>
+                必要な列: 対象日, 曜日, 売上日計, サウナ, 人数（S), 宿泊売上計, 人数(C), マッサージ, グリ, 物販</p>
+                
+                <div class="flex flex-col gap-4">
+                    <textarea id="dataInput" rows="6" class="w-full p-2 border border-gray-300 rounded-md" placeholder="ここにデータを貼り付けてください（CSVまたはタブ区切り形式）"></textarea>
+                    
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <button id="processDataBtn" class="btn-primary px-4 py-2 rounded-md">データを分析</button>
+                        <button id="loadSampleBtn" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-md">サンプルデータを読み込む</button>
+                    </div>
+                </div>
+                
+                <div id="fileStatus" class="mt-4 hidden">
+                    <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm text-blue-700" id="fileStatusText">
+                                    データを処理中...
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="dashboardContent" class="hidden">
+            <!-- フィルターセクション -->
+            <div class="card p-4 md:p-6 mb-8">
+                <h2 class="text-xl font-semibold mb-4">期間フィルター</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">期間</label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <input type="date" id="startDate" class="flex-1 p-2 border border-gray-300 rounded-md">
+                            <span class="flex items-center justify-center">～</span>
+                            <input type="date" id="endDate" class="flex-1 p-2 border border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">曜日</label>
+                        <select id="weekdayFilter" class="w-1/2 p-2 border border-gray-300 rounded-md">
+                            <option value="all">すべて</option>
+                            <option value="月">月曜日</option>
+                            <option value="火">火曜日</option>
+                            <option value="水">水曜日</option>
+                            <option value="木">木曜日</option>
+                            <option value="金">金曜日</option>
+                            <option value="土">土曜日</option>
+                            <option value="日">日曜日</option>
+                        </select>
+                    </div>
+                    <div class="flex items-end">
+                        <button id="applyFilterBtn" class="btn-primary px-4 py-2 rounded-md w-full">フィルターを適用</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- サマリーカード -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <div class="summary-card card p-4">
+                    <h3 class="text-lg font-medium opacity-80">総売上</h3>
+                    <p class="text-3xl font-bold mt-2" id="totalSales">¥0</p>
+                    <p class="text-sm mt-1 opacity-80" id="salesCompare">期間合計</p>
+                </div>
+                <div class="summary-card-alt card p-4">
+                    <h3 class="text-lg font-medium opacity-80">サウナ利用者数</h3>
+                    <p class="text-3xl font-bold mt-2" id="totalSaunaCount">0人</p>
+                    <p class="text-sm mt-1 opacity-80" id="saunaCountCompare">期間合計</p>
+                </div>
+                <div class="summary-card card p-4">
+                    <h3 class="text-lg font-medium opacity-80">宿泊者数</h3>
+                    <p class="text-3xl font-bold mt-2" id="totalStayingCount">0人</p>
+                    <p class="text-sm mt-1 opacity-80" id="stayingCountCompare">期間合計</p>
+                </div>
+                <div class="summary-card-alt card p-4">
+                    <h3 class="text-lg font-medium opacity-80">平均客単価</h3>
+                    <p class="text-3xl font-bold mt-2" id="averagePrice">¥0</p>
+                    <p class="text-sm mt-1 opacity-80" id="priceCompare">期間平均</p>
+                </div>
+            </div>
+
+            <!-- サービス別サマリー -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+                <div class="card p-4 bg-blue-50">
+                    <h3 class="text-md font-medium text-blue-800">サウナ売上</h3>
+                    <p class="text-2xl font-bold mt-1 text-blue-900" id="saunaSalesTotal">¥0</p>
+                    <p class="text-xs mt-1 text-blue-600" id="saunaSalesPercent">全体の0%</p>
+                </div>
+                <div class="card p-4 bg-indigo-50">
+                    <h3 class="text-md font-medium text-indigo-800">宿泊売上</h3>
+                    <p class="text-2xl font-bold mt-1 text-indigo-900" id="stayingSalesTotal">¥0</p>
+                    <p class="text-xs mt-1 text-indigo-600" id="stayingSalesPercent">全体の0%</p>
+                </div>
+                <div class="card p-4 bg-purple-50">
+                    <h3 class="text-md font-medium text-purple-800">マッサージ売上</h3>
+                    <p class="text-2xl font-bold mt-1 text-purple-900" id="massageSalesTotal">¥0</p>
+                    <p class="text-xs mt-1 text-purple-600" id="massageSalesPercent">全体の0%</p>
+                </div>
+                <div class="card p-4 bg-green-50">
+                    <h3 class="text-md font-medium text-green-800">グリル売上</h3>
+                    <p class="text-2xl font-bold mt-1 text-green-900" id="grillSalesTotal">¥0</p>
+                    <p class="text-xs mt-1 text-green-600" id="grillSalesPercent">全体の0%</p>
+                </div>
+                <div class="card p-4 bg-amber-50">
+                    <h3 class="text-md font-medium text-amber-800">物販売上</h3>
+                    <p class="text-2xl font-bold mt-1 text-amber-900" id="retailSalesTotal">¥0</p>
+                    <p class="text-xs mt-1 text-amber-600" id="retailSalesPercent">全体の0%</p>
+                </div>
+            </div>
+
+            <!-- チャートセクション -->
+            <div class="card p-4 md:p-6 mb-8">
+                <h2 class="text-xl font-semibold mb-4">日別売上推移</h2>
+                <div class="chart-container-large">
+                    <canvas id="dailySalesChart"></canvas>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">サービス別売上構成</h2>
+                    <div class="chart-container">
+                        <canvas id="serviceSalesChart"></canvas>
+                    </div>
+                </div>
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">人数と売上の相関</h2>
+                    <div class="chart-container">
+                        <canvas id="correlationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">曜日別サウナ利用分布</h2>
+                    <div class="chart-container">
+                        <canvas id="weekdaySaunaChart"></canvas>
+                    </div>
+                </div>
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">曜日別宿泊利用分布</h2>
+                    <div class="chart-container">
+                        <canvas id="weekdayStayingChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- データテーブル -->
+            <div class="card p-4 md:p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">日別データ</h2>
+                    <button id="exportCsvBtn" class="btn-primary px-4 py-2 rounded-md">CSVエクスポート</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日付</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">曜日</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">売上日計</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">サウナ売上</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">サウナ人数</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">宿泊売上</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">宿泊人数</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">マッサージ</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">グリル</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">物販</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- データ行がここに入ります -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-4 flex justify-between items-center">
+                    <div class="text-sm text-gray-700" id="tableInfo">
+                        0件中 1-0件を表示
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="prevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md disabled:opacity-50">前へ</button>
+                        <button id="nextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md disabled:opacity-50">次へ</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 共有モーダル -->
+    <div id="shareModal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">分析結果を共有</h2>
+                <button id="closeModalBtn" class="text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <p class="mb-4">以下のURLを共有すると、現在の分析結果を他の人と共有できます。</p>
+            <div class="flex mb-4">
+                <input id="shareUrl" type="text" class="flex-1 p-2 border border-gray-300 rounded-l-md" readonly>
+                <button id="copyUrlBtn" class="btn-primary px-4 py-2 rounded-r-md">コピー</button>
+            </div>
+            <div class="mt-4 text-sm text-gray-600">
+                <p>※ 共有URLには入力データが含まれています。共有先でデータの入力は不要です。</p>
+                <p>※ 長期間の保存には適していません。データ量が多い場合はURLが長くなります。</p>
+            </div>
         </div>
     </div>
 
     <script>
-        // グローバル変数としてチャートインスタンスと全データ、ヘッダーを保持
-        let myChartInstance = null;
-        let allParsedData = []; // ヘッダーを含む全てのパース済みデータ
-        let headers = []; // データのヘッダー
+        // グローバル変数
+        let salesData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        const rowsPerPage = 10;
+        let charts = {};
+        let isViewMode = false;
+        
+        // 曜日の順序マッピング（ソート用）
+        const weekdayOrder = {
+            '月': 0,
+            '火': 1,
+            '水': 2,
+            '木': 3,
+            '金': 4,
+            '土': 5,
+            '日': 6
+        };
 
-        // メッセージ表示関数
-        function showMessage(msg, type) {
-            const messageDiv = document.getElementById('message');
-            messageDiv.textContent = msg;
-            messageDiv.className = `message ${type}`; // クラスをリセットして再設定
-            messageDiv.style.display = 'block'; // 表示
-            setTimeout(() => {
-                messageDiv.style.display = 'none'; // 5秒後に非表示
-            }, 5000);
+        // DOMが読み込まれたら実行
+        document.addEventListener('DOMContentLoaded', function() {
+            // イベントリスナーの設定
+            document.getElementById('processDataBtn').addEventListener('click', processInputData);
+            document.getElementById('loadSampleBtn').addEventListener('click', loadSampleData);
+            document.getElementById('applyFilterBtn').addEventListener('click', applyFilters);
+            document.getElementById('exportCsvBtn').addEventListener('click', exportToCsv);
+            document.getElementById('prevPageBtn').addEventListener('click', () => changePage(-1));
+            document.getElementById('nextPageBtn').addEventListener('click', () => changePage(1));
+            document.getElementById('shareBtn').addEventListener('click', showShareModal);
+            document.getElementById('closeModalBtn').addEventListener('click', hideShareModal);
+            document.getElementById('copyUrlBtn').addEventListener('click', copyShareUrl);
+            
+            // URLパラメータをチェック
+            checkUrlParams();
+        });
+
+        // URLパラメータのチェック
+        function checkUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const viewMode = urlParams.get('view');
+            const startDate = urlParams.get('start');
+            const endDate = urlParams.get('end');
+            const weekday = urlParams.get('weekday');
+            const compressedData = urlParams.get('data');
+            
+            if (viewMode === 'true') {
+                isViewMode = true;
+                // 入力セクションを非表示
+                document.getElementById('inputSection').style.display = 'none';
+                
+                // フィルター設定を復元
+                if (startDate) document.getElementById('startDate').value = startDate;
+                if (endDate) document.getElementById('endDate').value = endDate;
+                if (weekday) document.getElementById('weekdayFilter').value = weekday;
+                
+                // 共有ボタンのテキストを変更
+                document.getElementById('shareBtn').textContent = 'データを編集';
+                document.getElementById('shareBtn').addEventListener('click', function() {
+                    window.location.href = window.location.pathname;
+                });
+                
+                // 圧縮データがある場合は復元
+                if (compressedData) {
+                    try {
+                        const decompressedData = LZString.decompressFromEncodedURIComponent(compressedData);
+                        if (decompressedData) {
+                            const parsedData = JSON.parse(decompressedData);
+                            if (Array.isArray(parsedData) && parsedData.length > 0) {
+                                salesData = parsedData;
+                                setupDateRange();
+                                applyFilters();
+                                document.getElementById('dashboardContent').classList.remove('hidden');
+                            }
+                        }
+                    } catch (e) {
+                        console.error('データの復元に失敗しました:', e);
+                        alert('共有データの読み込みに失敗しました。URLが正しいか確認してください。');
+                    }
+                }
+            }
         }
 
-        // グラフの描画/更新関数
-        function updateChart(chartLabels, chartData, chartType, dataLabel, xAxisLabel) {
-            const ctx = document.getElementById('myChart').getContext('2d');
-
-            if (myChartInstance) {
-                myChartInstance.destroy();
+        // 入力データの処理
+        function processInputData() {
+            const inputText = document.getElementById('dataInput').value.trim();
+            if (!inputText) {
+                alert('データを入力してください');
+                return;
             }
 
-            myChartInstance = new Chart(ctx, {
-                type: chartType,
+            const fileStatus = document.getElementById('fileStatus');
+            const fileStatusText = document.getElementById('fileStatusText');
+            
+            fileStatus.classList.remove('hidden');
+            fileStatusText.textContent = `データを処理中...`;
+
+            try {
+                // データの形式を判断（CSVかタブ区切りか）
+                const delimiter = inputText.includes('\t') ? '\t' : ',';
+                
+                // データを行に分割
+                const lines = inputText.split(/\r?\n/).filter(line => line.trim());
+                
+                // ヘッダー行を取得
+                const headers = lines[0].split(delimiter).map(h => h.trim());
+                
+                // データ行を処理
+                const data = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(delimiter);
+                    if (values.length !== headers.length) continue;
+                    
+                    const row = {};
+                    headers.forEach((header, index) => {
+                        row[header] = values[index].trim();
+                    });
+                    data.push(row);
+                }
+                
+                // データを処理
+                processData(data);
+                
+            } catch (error) {
+                fileStatusText.textContent = `エラー: ${error.message}`;
+                console.error('データ処理エラー:', error);
+            }
+        }
+
+        // サンプルデータの読み込み
+        function loadSampleData() {
+            const fileStatus = document.getElementById('fileStatus');
+            const fileStatusText = document.getElementById('fileStatusText');
+            
+            fileStatus.classList.remove('hidden');
+            fileStatusText.textContent = "サンプルデータを読み込み中...";
+
+            // サンプルデータの生成
+            const sampleData = generateSampleData();
+            
+            // 将来の日付を追加（2025/5/1）
+            sampleData.push({
+                date: "2025-05-01",
+                weekday: "木",
+                totalSales: 350000,
+                saunaSales: 120000,
+                saunaCount: 80,
+                stayingSales: 150000,
+                stayingCount: 25,
+                massageSales: 40000,
+                grillSales: 25000,
+                retailSales: 15000
+            });
+            
+            // サンプルデータをテキストエリアに表示
+            const sampleText = formatSampleDataForDisplay(sampleData);
+            document.getElementById('dataInput').value = sampleText;
+            
+            // サンプルデータは既に構造化されているので、直接処理
+            salesData = sampleData;
+            setupDateRange();
+            applyFilters();
+            
+            // ダッシュボードを表示
+            document.getElementById('dashboardContent').classList.remove('hidden');
+            fileStatusText.textContent = `${salesData.length}件のサンプルデータを読み込みました。`;
+        }
+
+        // サンプルデータをテキストエリア表示用にフォーマット
+        function formatSampleDataForDisplay(data) {
+            if (!data || data.length === 0) return '';
+            
+            // ヘッダー行
+            const headers = ['対象日', '曜日', '売上日計', 'サウナ', '人数（S)', '宿泊売上計', '人数(C)', 'マッサージ', 'グリ', '物販'];
+            
+            // データ行
+            const rows = data.map(item => {
+                // 日付を YYYY-MM-DD から YYYY/MM/DD に変換
+                const formattedDate = item.date.replace(/-/g, '/');
+                
+                return [
+                    formattedDate,
+                    item.weekday,
+                    item.totalSales,
+                    item.saunaSales,
+                    item.saunaCount,
+                    item.stayingSales,
+                    item.stayingCount,
+                    item.massageSales,
+                    item.grillSales,
+                    item.retailSales
+                ];
+            });
+            
+            // タブ区切りで結合
+            return [headers.join('\t')].concat(rows.map(row => row.join('\t'))).join('\n');
+        }
+
+        // サンプルデータの生成
+        function generateSampleData() {
+            const data = [];
+            const weekdays = ['月', '火', '水', '木', '金', '土', '日'];
+            
+            // 過去3ヶ月分のデータを生成
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setMonth(endDate.getMonth() - 3);
+            
+            // 基本料金設定
+            const baseSettings = {
+                saunaPrice: 1500,
+                stayingPrice: 6000,
+                massagePrice: 4000,
+                grillAvg: 1200,
+                retailAvg: 800
+            };
+            
+            // 曜日係数（土日は混む）
+            const weekdayFactor = {
+                '月': 0.7,
+                '火': 0.6,
+                '水': 0.7,
+                '木': 0.8,
+                '金': 1.0,
+                '土': 1.5,
+                '日': 1.3
+            };
+
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                const weekday = weekdays[d.getDay() === 0 ? 6 : d.getDay() - 1]; // 0=日曜 を 6=日曜 に変換
+                const factor = weekdayFactor[weekday];
+                
+                // 季節係数（月によって変動）
+                const monthFactor = 1 + (Math.sin(d.getMonth() / 2) * 0.2);
+                
+                // ランダム係数（日によるばらつき）
+                const randomFactor = 0.8 + (Math.random() * 0.4);
+                
+                // 総合係数
+                const totalFactor = factor * monthFactor * randomFactor;
+                
+                // サウナ利用者数
+                const saunaCount = Math.round(40 * totalFactor);
+                
+                // 宿泊者数（サウナ利用者の一部）
+                const stayingCount = Math.round(saunaCount * 0.15);
+                
+                // 各売上の計算
+                const saunaSales = saunaCount * baseSettings.saunaPrice;
+                const stayingSales = stayingCount * baseSettings.stayingPrice;
+                const massageSales = Math.round(saunaCount * 0.2) * baseSettings.massagePrice;
+                const grillSales = Math.round(saunaCount * 0.6) * baseSettings.grillAvg;
+                const retailSales = Math.round(saunaCount * 0.3) * baseSettings.retailAvg;
+                
+                // 総売上
+                const totalSales = saunaSales + stayingSales + massageSales + grillSales + retailSales;
+                
+                data.push({
+                    date: d.toISOString().split('T')[0],
+                    weekday: weekday,
+                    totalSales: Math.round(totalSales),
+                    saunaSales: Math.round(saunaSales),
+                    saunaCount: saunaCount,
+                    stayingSales: Math.round(stayingSales),
+                    stayingCount: stayingCount,
+                    massageSales: Math.round(massageSales),
+                    grillSales: Math.round(grillSales),
+                    retailSales: Math.round(retailSales)
+                });
+            }
+
+            return data;
+        }
+
+        // 日付文字列を標準形式（YYYY-MM-DD）に変換する関数
+        function parseAndFormatDate(dateStr) {
+            if (!dateStr) return null;
+            
+            // 日付文字列を正規化（区切り文字を統一）
+            dateStr = String(dateStr).trim()
+                .replace(/[年月]/g, '/')
+                .replace(/日/g, '')
+                .replace(/\s+/g, '');
+            
+            let parsedDate;
+            
+            // YYYY/MM/DD または YYYY-MM-DD 形式
+            if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(dateStr)) {
+                const parts = dateStr.split(/[/-]/);
+                parsedDate = new Date(parts[0], parts[1] - 1, parts[2]);
+            }
+            // MM/DD/YYYY 形式
+            else if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(dateStr)) {
+                const parts = dateStr.split(/[/-]/);
+                parsedDate = new Date(parts[2], parts[0] - 1, parts[1]);
+            }
+            // DD/MM/YYYY 形式（日本では少ないが一応）
+            else if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(dateStr)) {
+                const parts = dateStr.split(/[/-]/);
+                parsedDate = new Date(parts[2], parts[1] - 1, parts[0]);
+            }
+            // YYYYMMDD 形式
+            else if (/^\d{8}$/.test(dateStr)) {
+                const year = dateStr.substring(0, 4);
+                const month = dateStr.substring(4, 6);
+                const day = dateStr.substring(6, 8);
+                parsedDate = new Date(year, month - 1, day);
+            }
+            // その他の形式は直接 Date コンストラクタで試す
+            else {
+                parsedDate = new Date(dateStr);
+            }
+            
+            // 日付が有効かチェック
+            if (isNaN(parsedDate.getTime())) {
+                console.warn(`無効な日付形式: ${dateStr}`);
+                return null;
+            }
+            
+            // YYYY-MM-DD 形式に変換
+            const year = parsedDate.getFullYear();
+            const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+            const day = String(parsedDate.getDate()).padStart(2, '0');
+            
+            return `${year}-${month}-${day}`;
+        }
+
+        // データの処理
+        function processData(data) {
+            try {
+                // データの前処理
+                salesData = data.map(row => {
+                    try {
+                        // 日付の処理
+                        let dateValue = row['対象日'] || row['日付'] || Object.values(row)[0];
+                        const formattedDate = parseAndFormatDate(dateValue);
+                        
+                        if (!formattedDate) {
+                            console.error("日付の解析に失敗:", dateValue);
+                            return null;
+                        }
+
+                        // 数値の処理（カンマや通貨記号を除去）
+                        const parseNumeric = (value) => {
+                            if (value === undefined || value === null || value === '') return 0;
+                            if (typeof value === 'number') return value;
+                            return Number(String(value).replace(/[^\d.-]/g, '')) || 0;
+                        };
+
+                        // 各フィールドの取得（複数の可能性のある列名をチェック）
+                        const weekday = row['曜日'] || '';
+                        const totalSales = parseNumeric(row['売上日計'] || row['売上合計'] || row['総売上']);
+                        const saunaSales = parseNumeric(row['サウナ'] || row['サウナ売上']);
+                        
+                        // サウナ人数 - 「人数（S)」または「サウナ人数」などの列を探す
+                        let saunaCount = 0;
+                        for (const key of Object.keys(row)) {
+                            if (key.includes('人数') && (key.includes('S') || key.includes('s') || key.toLowerCase().includes('sauna'))) {
+                                saunaCount = parseNumeric(row[key]);
+                                break;
+                            }
+                        }
+                        if (saunaCount === 0) {
+                            saunaCount = parseNumeric(row['サウナ人数'] || row['サウナ利用者数']);
+                        }
+                        
+                        const stayingSales = parseNumeric(row['宿泊売上計'] || row['宿泊売上'] || row['宿泊']);
+                        
+                        // 宿泊人数 - 「人数(C)」または「宿泊人数」などの列を探す
+                        let stayingCount = 0;
+                        for (const key of Object.keys(row)) {
+                            if (key.includes('人数') && (key.includes('C') || key.includes('c') || key.toLowerCase().includes('stay'))) {
+                                stayingCount = parseNumeric(row[key]);
+                                break;
+                            }
+                        }
+                        if (stayingCount === 0) {
+                            stayingCount = parseNumeric(row['宿泊人数'] || row['宿泊者数']);
+                        }
+                        
+                        const massageSales = parseNumeric(row['マッサージ'] || row['マッサージ売上']);
+                        const grillSales = parseNumeric(row['グリ'] || row['グリル'] || row['グリル売上']);
+                        const retailSales = parseNumeric(row['物販'] || row['物販売上']);
+
+                        return {
+                            date: formattedDate,
+                            weekday: weekday,
+                            totalSales: totalSales,
+                            saunaSales: saunaSales,
+                            saunaCount: saunaCount,
+                            stayingSales: stayingSales,
+                            stayingCount: stayingCount,
+                            massageSales: massageSales,
+                            grillSales: grillSales,
+                            retailSales: retailSales
+                        };
+                    } catch (e) {
+                        console.error("行の処理中にエラー:", e);
+                        return null;
+                    }
+                }).filter(item => item && item.date);
+
+                if (salesData.length === 0) {
+                    document.getElementById('fileStatusText').textContent = "有効なデータが見つかりませんでした。データ形式を確認してください。";
+                    return;
+                }
+
+                // 日付でソート
+                salesData.sort((a, b) => a.date.localeCompare(b.date));
+                
+                // 日付範囲の初期設定
+                setupDateRange();
+                
+                // フィルターを適用してダッシュボードを表示
+                applyFilters();
+                
+                // ダッシュボードを表示
+                document.getElementById('dashboardContent').classList.remove('hidden');
+                document.getElementById('fileStatusText').textContent = `${salesData.length}件のデータを読み込みました。`;
+            } catch (e) {
+                console.error("データ処理中にエラー:", e);
+                document.getElementById('fileStatusText').textContent = `データ処理中にエラーが発生しました: ${e.message}`;
+            }
+        }
+
+        // 日付範囲の設定
+        function setupDateRange() {
+            const dates = salesData.map(item => new Date(item.date));
+            const validDates = dates.filter(date => !isNaN(date.getTime()));
+            
+            if (validDates.length > 0) {
+                const minDate = new Date(Math.min(...validDates));
+                const maxDate = new Date(Math.max(...validDates));
+                
+                document.getElementById('startDate').value = minDate.toISOString().split('T')[0];
+                document.getElementById('endDate').value = maxDate.toISOString().split('T')[0];
+            }
+        }
+
+        // フィルターの適用
+        function applyFilters() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const weekday = document.getElementById('weekdayFilter').value;
+            
+            filteredData = salesData.filter(item => {
+                const dateCondition = (!startDate || item.date >= startDate) && (!endDate || item.date <= endDate);
+                const weekdayCondition = weekday === 'all' || item.weekday === weekday;
+                
+                return dateCondition && weekdayCondition;
+            });
+            
+            // ダッシュボードの更新
+            updateDashboard();
+        }
+
+        // ダッシュボードの更新
+        function updateDashboard() {
+            updateSummaryCards();
+            updateServiceSummary();
+            updateCharts();
+            updateDataTable();
+        }
+
+        // サマリーカードの更新
+        function updateSummaryCards() {
+            const totalSales = filteredData.reduce((sum, item) => sum + item.totalSales, 0);
+            const totalSaunaCount = filteredData.reduce((sum, item) => sum + item.saunaCount, 0);
+            const totalStayingCount = filteredData.reduce((sum, item) => sum + item.stayingCount, 0);
+            const totalCount = totalSaunaCount + totalStayingCount;
+            const averagePrice = totalCount > 0 ? totalSales / totalCount : 0;
+            
+            document.getElementById('totalSales').textContent = `¥${totalSales.toLocaleString()}`;
+            document.getElementById('totalSaunaCount').textContent = `${totalSaunaCount.toLocaleString()}人`;
+            document.getElementById('totalStayingCount').textContent = `${totalStayingCount.toLocaleString()}人`;
+            document.getElementById('averagePrice').textContent = `¥${Math.round(averagePrice).toLocaleString()}`;
+        }
+
+        // サービス別サマリーの更新
+        function updateServiceSummary() {
+            const totalSales = filteredData.reduce((sum, item) => sum + item.totalSales, 0);
+            const saunaSales = filteredData.reduce((sum, item) => sum + item.saunaSales, 0);
+            const stayingSales = filteredData.reduce((sum, item) => sum + item.stayingSales, 0);
+            const massageSales = filteredData.reduce((sum, item) => sum + item.massageSales, 0);
+            const grillSales = filteredData.reduce((sum, item) => sum + item.grillSales, 0);
+            const retailSales = filteredData.reduce((sum, item) => sum + item.retailSales, 0);
+            
+            document.getElementById('saunaSalesTotal').textContent = `¥${saunaSales.toLocaleString()}`;
+            document.getElementById('stayingSalesTotal').textContent = `¥${stayingSales.toLocaleString()}`;
+            document.getElementById('massageSalesTotal').textContent = `¥${massageSales.toLocaleString()}`;
+            document.getElementById('grillSalesTotal').textContent = `¥${grillSales.toLocaleString()}`;
+            document.getElementById('retailSalesTotal').textContent = `¥${retailSales.toLocaleString()}`;
+            
+            // 割合の計算
+            if (totalSales > 0) {
+                document.getElementById('saunaSalesPercent').textContent = `全体の${Math.round(saunaSales / totalSales * 100)}%`;
+                document.getElementById('stayingSalesPercent').textContent = `全体の${Math.round(stayingSales / totalSales * 100)}%`;
+                document.getElementById('massageSalesPercent').textContent = `全体の${Math.round(massageSales / totalSales * 100)}%`;
+                document.getElementById('grillSalesPercent').textContent = `全体の${Math.round(grillSales / totalSales * 100)}%`;
+                document.getElementById('retailSalesPercent').textContent = `全体の${Math.round(retailSales / totalSales * 100)}%`;
+            }
+        }
+
+        // チャートの更新
+        function updateCharts() {
+            // 既存のチャートを破棄
+            Object.values(charts).forEach(chart => {
+                if (chart) chart.destroy();
+            });
+            charts = {};
+            
+            // 日別売上推移チャート
+            createDailySalesChart();
+            
+            // サービス別売上構成チャート
+            createServiceSalesChart();
+            
+            // 人数と売上の相関チャート
+            createCorrelationChart();
+            
+            // 曜日別サウナ利用分布チャート
+            createWeekdaySaunaChart();
+            
+            // 曜日別宿泊利用分布チャート
+            createWeekdayStayingChart();
+        }
+
+        // 日別売上推移チャートの作成
+        function createDailySalesChart() {
+            // 日付でソート
+            const sortedData = [...filteredData].sort((a, b) => a.date.localeCompare(b.date));
+            
+            const labels = sortedData.map(item => {
+                const date = new Date(item.date);
+                return `${date.getMonth() + 1}/${date.getDate()}`;
+            });
+            
+            const totalSalesData = sortedData.map(item => item.totalSales);
+            const saunaSalesData = sortedData.map(item => item.saunaSales);
+            const stayingSalesData = sortedData.map(item => item.stayingSales);
+            
+            const ctx = document.getElementById('dailySalesChart').getContext('2d');
+            charts.dailySales = new Chart(ctx, {
+                type: 'line',
                 data: {
-                    labels: chartLabels,
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '総売上',
+                            data: totalSalesData,
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            borderColor: 'rgba(59, 130, 246, 1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: false
+                        },
+                        {
+                            label: 'サウナ売上',
+                            data: saunaSalesData,
+                            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                            borderColor: 'rgba(16, 185, 129, 1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: false
+                        },
+                        {
+                            label: '宿泊売上',
+                            data: stayingSalesData,
+                            backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                            borderColor: 'rgba(139, 92, 246, 1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ¥${context.raw.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // サービス別売上構成チャートの作成
+        function createServiceSalesChart() {
+            const saunaSales = filteredData.reduce((sum, item) => sum + item.saunaSales, 0);
+            const stayingSales = filteredData.reduce((sum, item) => sum + item.stayingSales, 0);
+            const massageSales = filteredData.reduce((sum, item) => sum + item.massageSales, 0);
+            const grillSales = filteredData.reduce((sum, item) => sum + item.grillSales, 0);
+            const retailSales = filteredData.reduce((sum, item) => sum + item.retailSales, 0);
+            
+            const ctx = document.getElementById('serviceSalesChart').getContext('2d');
+            charts.serviceSales = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['サウナ', '宿泊', 'マッサージ', 'グリル', '物販'],
                     datasets: [{
-                        label: dataLabel,
-                        data: chartData,
-                        backgroundColor: chartType === 'bar' ? 'rgba(75, 192, 192, 0.6)' : 'rgba(75, 192, 192, 0.2)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1,
-                        fill: chartType === 'line' ? true : false,
-                        tension: 0.1 // 折れ線グラフの滑らかさ
+                        data: [saunaSales, stayingSales, massageSales, grillSales, retailSales],
+                        backgroundColor: [
+                            'rgba(59, 130, 246, 0.8)',
+                            'rgba(139, 92, 246, 0.8)',
+                            'rgba(236, 72, 153, 0.8)',
+                            'rgba(16, 185, 129, 0.8)',
+                            'rgba(245, 158, 11, 0.8)'
+                        ],
+                        borderWidth: 1
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.raw;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = Math.round((value / total) * 100);
+                                    return `${label}: ¥${value.toLocaleString()} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 曜日別サウナ利用分布チャートの作成
+        function createWeekdaySaunaChart() {
+            // 曜日ごとにデータを集計
+            const weekdaySummary = {};
+            
+            filteredData.forEach(item => {
+                const weekday = item.weekday;
+                if (!weekday) return;
+                
+                if (!weekdaySummary[weekday]) {
+                    weekdaySummary[weekday] = {
+                        totalSales: 0,
+                        count: 0,
+                        saunaCount: 0,
+                        saunaSales: 0
+                    };
+                }
+                
+                weekdaySummary[weekday].totalSales += item.totalSales;
+                weekdaySummary[weekday].saunaCount += item.saunaCount;
+                weekdaySummary[weekday].saunaSales += item.saunaSales;
+                weekdaySummary[weekday].count++;
+            });
+            
+            // 曜日順にソート
+            const sortedWeekdays = Object.keys(weekdaySummary).sort((a, b) => {
+                return (weekdayOrder[a] || 0) - (weekdayOrder[b] || 0);
+            });
+            
+            // 平均売上と平均人数を計算
+            const avgSaunaSales = sortedWeekdays.map(weekday => {
+                const summary = weekdaySummary[weekday];
+                return summary.count > 0 ? Math.round(summary.saunaSales / summary.count) : 0;
+            });
+            
+            const avgSaunaCount = sortedWeekdays.map(weekday => {
+                const summary = weekdaySummary[weekday];
+                return summary.count > 0 ? Math.round(summary.saunaCount / summary.count) : 0;
+            });
+            
+            const ctx = document.getElementById('weekdaySaunaChart').getContext('2d');
+            charts.weekdaySauna = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sortedWeekdays,
+                    datasets: [
+                        {
+                            label: '平均サウナ売上',
+                            data: avgSaunaSales,
+                            backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                            borderColor: 'rgba(59, 130, 246, 1)',
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '平均サウナ利用者数',
+                            data: avgSaunaCount,
+                            backgroundColor: 'rgba(245, 158, 11, 0.8)',
+                            borderColor: 'rgba(245, 158, 11, 1)',
+                            borderWidth: 1,
+                            type: 'line',
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label === '平均サウナ売上') {
+                                        return `${context.dataset.label}: ¥${context.raw.toLocaleString()}`;
+                                    } else {
+                                        return `${context.dataset.label}: ${context.raw.toLocaleString()}人`;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '売上 (円)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
+                                }
+                            }
+                        },
+                        y1: {
+                            beginAtZero: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '人数'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 曜日別宿泊利用分布チャートの作成
+        function createWeekdayStayingChart() {
+            // 曜日ごとにデータを集計
+            const weekdaySummary = {};
+            
+            filteredData.forEach(item => {
+                const weekday = item.weekday;
+                if (!weekday) return;
+                
+                if (!weekdaySummary[weekday]) {
+                    weekdaySummary[weekday] = {
+                        totalSales: 0,
+                        count: 0,
+                        stayingCount: 0,
+                        stayingSales: 0
+                    };
+                }
+                
+                weekdaySummary[weekday].totalSales += item.totalSales;
+                weekdaySummary[weekday].stayingCount += item.stayingCount;
+                weekdaySummary[weekday].stayingSales += item.stayingSales;
+                weekdaySummary[weekday].count++;
+            });
+            
+            // 曜日順にソート
+            const sortedWeekdays = Object.keys(weekdaySummary).sort((a, b) => {
+                return (weekdayOrder[a] || 0) - (weekdayOrder[b] || 0);
+            });
+            
+            // 平均売上と平均人数を計算
+            const avgStayingSales = sortedWeekdays.map(weekday => {
+                const summary = weekdaySummary[weekday];
+                return summary.count > 0 ? Math.round(summary.stayingSales / summary.count) : 0;
+            });
+            
+            const avgStayingCount = sortedWeekdays.map(weekday => {
+                const summary = weekdaySummary[weekday];
+                return summary.count > 0 ? Math.round(summary.stayingCount / summary.count) : 0;
+            });
+            
+            const ctx = document.getElementById('weekdayStayingChart').getContext('2d');
+            charts.weekdayStaying = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sortedWeekdays,
+                    datasets: [
+                        {
+                            label: '平均宿泊売上',
+                            data: avgStayingSales,
+                            backgroundColor: 'rgba(139, 92, 246, 0.8)',
+                            borderColor: 'rgba(139, 92, 246, 1)',
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '平均宿泊者数',
+                            data: avgStayingCount,
+                            backgroundColor: 'rgba(236, 72, 153, 0.8)',
+                            borderColor: 'rgba(236, 72, 153, 1)',
+                            borderWidth: 1,
+                            type: 'line',
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label === '平均宿泊売上') {
+                                        return `${context.dataset.label}: ¥${context.raw.toLocaleString()}`;
+                                    } else {
+                                        return `${context.dataset.label}: ${context.raw.toLocaleString()}人`;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '売上 (円)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
+                                }
+                            }
+                        },
+                        y1: {
+                            beginAtZero: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '人数'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 人数と売上の相関チャートの作成
+        function createCorrelationChart() {
+            // 散布図用のデータを作成（サウナ人数と宿泊人数の合計と総売上の相関）
+            const scatterData = filteredData.map(item => ({
+                x: item.saunaCount + item.stayingCount, // 総利用者数
+                y: item.totalSales,
+                date: item.date,
+                weekday: item.weekday
+            }));
+            
+            // 曜日ごとに色分け
+            const weekdayColors = {
+                '月': 'rgba(59, 130, 246, 0.7)',
+                '火': 'rgba(16, 185, 129, 0.7)',
+                '水': 'rgba(139, 92, 246, 0.7)',
+                '木': 'rgba(245, 158, 11, 0.7)',
+                '金': 'rgba(236, 72, 153, 0.7)',
+                '土': 'rgba(220, 38, 38, 0.7)',
+                '日': 'rgba(37, 99, 235, 0.7)'
+            };
+            
+            const pointColors = scatterData.map(item => weekdayColors[item.weekday] || 'rgba(107, 114, 128, 0.7)');
+            
+            const ctx = document.getElementById('correlationChart').getContext('2d');
+            charts.correlation = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: '総利用者数と売上の相関',
+                        data: scatterData,
+                        backgroundColor: pointColors,
+                        borderColor: 'rgba(107, 114, 128, 0.3)',
+                        borderWidth: 1,
+                        pointRadius: 6,
+                        pointHoverRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const point = context.raw;
+                                    const date = new Date(point.date);
+                                    const formattedDate = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+                                    return [
+                                        `${formattedDate} (${point.weekday})`,
+                                        `総利用者数: ${point.x}人`,
+                                        `売上: ¥${point.y.toLocaleString()}`
+                                    ];
+                                }
+                            }
+                        }
+                    },
                     scales: {
                         x: {
                             title: {
                                 display: true,
-                                text: xAxisLabel
-                            },
-                            // 日付軸の場合のオプション
-                            type: chartType === 'line' && (xAxisLabel === '日付' || xAxisLabel === '月') ? 'time' : 'category',
-                            time: {
-                                unit: xAxisLabel === '月' ? 'month' : 'day',
-                                tooltipFormat: xAxisLabel === '月' ? 'YYYY年M月' : 'YYYY/MM/DD',
-                                displayFormats: {
-                                    month: 'YYYY年M月',
-                                    day: 'YYYY/MM/DD'
-                                }
+                                text: '総利用者数 (人)'
                             }
                         },
                         y: {
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: dataLabel
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                title: function(context) {
-                                    if (xAxisLabel === '曜日') {
-                                        const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'];
-                                        return dayOfWeek[context[0].label];
-                                    }
-                                    return context[0].label;
+                                text: '売上 (円)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
                                 }
                             }
                         }
                     }
                 }
             });
-            showMessage('解析結果を表示しました！', 'success');
         }
 
-        // ファイル読み込み処理
-        document.getElementById('analyzeButton').addEventListener('click', () => {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
-
-            if (!file) {
-                showMessage('ファイルが選択されていません。', 'error');
-                return;
-            }
-
-            const fileName = file.name;
-            const fileExtension = fileName.split('.').pop().toLowerCase();
-
-            const reader = new FileReader();
-
-            reader.onload = function(e) {
-                try {
-                    let parsedData;
-                    if (fileExtension === 'csv') {
-                        // CSVファイルの読み込み
-                        const result = Papa.parse(e.target.result, {
-                            header: false, // 最初の行もデータとして扱う
-                            dynamicTyping: false,
-                            skipEmptyLines: true,
-                            // CSVのエンコーディングがShift-JISの場合
-                            // encoding: 'Shift_JIS',
-                            error: function(err) {
-                                throw new Error('CSV解析エラー: ' + err.message);
-                            }
-                        });
-                        if (result.errors.length) {
-                             throw new Error('CSV解析エラー: ' + result.errors[0].message);
-                        }
-                        parsedData = result.data;
-                    } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-                        // Excelファイルの読み込み
-                        const data = new Uint8Array(e.target.result);
-                        const workbook = XLSX.read(data, { type: 'array' });
-                        const sheetName = workbook.SheetNames[0];
-                        const worksheet = workbook.Sheets[sheetName];
-                        parsedData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                    } else {
-                        throw new Error('サポートされていないファイル形式です。CSVまたはExcelファイルを選択してください。');
-                    }
-
-                    if (parsedData.length === 0) {
-                        showMessage('ファイルにデータが見つかりません。', 'error');
-                        return;
-                    }
-
-                    // ヘッダーと実際のデータを分離
-                    headers = parsedData[0];
-                    allParsedData = parsedData.slice(1);
-
-                    // 解析オプションを表示
-                    document.querySelector('.analysis-options').style.display = 'block';
-
-                    // 解析項目ドロップダウンを更新
-                    populateColumnSelect();
-                    
-                    showMessage('データの読み込みと初期化が完了しました。解析オプションを選択してください。', 'success');
-
-                } catch (error) {
-                    showMessage('ファイルの読み込みまたは処理に失敗しました: ' + error.message, 'error');
-                    console.error('File processing error:', error);
+        // データテーブルの更新
+        function updateDataTable() {
+            const tableBody = document.getElementById('dataTableBody');
+            
+            // テーブル本体の更新
+            tableBody.innerHTML = '';
+            
+            // 日付でソート
+            const sortedData = [...filteredData].sort((a, b) => b.date.localeCompare(a.date));
+            
+            // ページネーション
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = Math.min(startIndex + rowsPerPage, sortedData.length);
+            const pageData = sortedData.slice(startIndex, endIndex);
+            
+            // テーブル行の生成
+            pageData.forEach(item => {
+                const row = document.createElement('tr');
+                
+                // 曜日に応じたクラスを追加
+                if (item.weekday === '日') {
+                    row.classList.add('weekday-0'); // 日曜
+                } else if (item.weekday === '土') {
+                    row.classList.add('weekday-6'); // 土曜
                 }
-            };
-
-            reader.onerror = function(err) {
-                showMessage('ファイルの読み込みに失敗しました: ' + err.message, 'error');
-                console.error('FileReader error:', err);
-            };
-
-            if (fileExtension === 'csv') {
-                reader.readAsText(file);
-            } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-                reader.readAsArrayBuffer(file);
-            }
-        });
-
-        // 解析項目（列）のドロップダウンを生成
-        function populateColumnSelect() {
-            const selectElement = document.getElementById('dataColumnSelect');
-            selectElement.innerHTML = ''; // 既存のオプションをクリア
-
-            // 除外する列名（日付列や集計対象外の列など）
-            const excludedColumns = ['日付']; // ここに日付列の正確な列名を追加
-
-            headers.forEach((header, index) => {
-                // 除外リストに含まれていない、かつヘッダーが空でない場合のみ追加
-                if (!excludedColumns.includes(header) && header.trim() !== '') {
-                    // その列が数値データを含んでいるか簡易チェック
-                    let hasNumericData = false;
-                    for (let i = 0; i < Math.min(allParsedData.length, 100); i++) { // 最初の100行をチェック
-                        const cellValue = allParsedData[i][index];
-                        if (cellValue !== undefined && cellValue !== null && !isNaN(Number(cellValue))) {
-                            hasNumericData = true;
-                            break;
-                        }
-                    }
-                    if (hasNumericData) {
-                        const option = document.createElement('option');
-                        option.value = index; // 列のインデックスを値として使用
-                        option.textContent = header;
-                        selectElement.appendChild(option);
-                    }
-                }
+                
+                // 日付
+                const dateCell = document.createElement('td');
+                dateCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-gray-900';
+                const date = new Date(item.date);
+                dateCell.textContent = `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
+                row.appendChild(dateCell);
+                
+                // 曜日
+                const weekdayCell = document.createElement('td');
+                weekdayCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-gray-900';
+                weekdayCell.textContent = item.weekday;
+                row.appendChild(weekdayCell);
+                
+                // 売上日計
+                const totalSalesCell = document.createElement('td');
+                totalSalesCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                totalSalesCell.textContent = `¥${item.totalSales.toLocaleString()}`;
+                row.appendChild(totalSalesCell);
+                
+                // サウナ売上
+                const saunaSalesCell = document.createElement('td');
+                saunaSalesCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                saunaSalesCell.textContent = `¥${item.saunaSales.toLocaleString()}`;
+                row.appendChild(saunaSalesCell);
+                
+                // サウナ人数
+                const saunaCountCell = document.createElement('td');
+                saunaCountCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                saunaCountCell.textContent = `${item.saunaCount.toLocaleString()}人`;
+                row.appendChild(saunaCountCell);
+                
+                // 宿泊売上
+                const stayingSalesCell = document.createElement('td');
+                stayingSalesCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                stayingSalesCell.textContent = `¥${item.stayingSales.toLocaleString()}`;
+                row.appendChild(stayingSalesCell);
+                
+                // 宿泊人数
+                const stayingCountCell = document.createElement('td');
+                stayingCountCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                stayingCountCell.textContent = `${item.stayingCount.toLocaleString()}人`;
+                row.appendChild(stayingCountCell);
+                
+                // マッサージ
+                const massageSalesCell = document.createElement('td');
+                massageSalesCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                massageSalesCell.textContent = `¥${item.massageSales.toLocaleString()}`;
+                row.appendChild(massageSalesCell);
+                
+                // グリル
+                const grillSalesCell = document.createElement('td');
+                grillSalesCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                grillSalesCell.textContent = `¥${item.grillSales.toLocaleString()}`;
+                row.appendChild(grillSalesCell);
+                
+                // 物販
+                const retailSalesCell = document.createElement('td');
+                retailSalesCell.className = 'px-4 py-2 whitespace-nowrap text-sm text-right text-gray-900';
+                retailSalesCell.textContent = `¥${item.retailSales.toLocaleString()}`;
+                row.appendChild(retailSalesCell);
+                
+                tableBody.appendChild(row);
             });
+            
+            // ページネーション情報の更新
+            document.getElementById('tableInfo').textContent = 
+                `${filteredData.length}件中 ${startIndex + 1}-${endIndex}件を表示`;
+            
+            // ページネーションボタンの状態更新
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = endIndex >= filteredData.length;
+        }
 
-            if (selectElement.options.length === 0) {
-                showMessage('解析可能な数値データ列が見つかりませんでした。データに数値列があるか確認してください。', 'error');
+        // ページ変更
+        function changePage(direction) {
+            currentPage += direction;
+            updateDataTable();
+        }
+
+        // CSVエクスポート
+        function exportToCsv() {
+            if (filteredData.length === 0) return;
+            
+            const headers = ['日付', '曜日', '売上日計', 'サウナ売上', 'サウナ人数', '宿泊売上', '宿泊人数', 'マッサージ', 'グリル', '物販'];
+            const csvContent = [
+                headers.join(','),
+                ...filteredData.map(item => [
+                    item.date,
+                    item.weekday,
+                    item.totalSales,
+                    item.saunaSales,
+                    item.saunaCount,
+                    item.stayingSales,
+                    item.stayingCount,
+                    item.massageSales,
+                    item.grillSales,
+                    item.retailSales
+                ].join(','))
+            ].join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', `施設売上データ_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // 共有モーダルの表示
+        function showShareModal() {
+            if (salesData.length === 0) {
+                alert('データを入力してから共有してください');
+                return;
+            }
+            
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const weekday = document.getElementById('weekdayFilter').value;
+            
+            // 現在のURLを取得
+            const url = new URL(window.location.href);
+            
+            // パラメータをクリア
+            url.search = '';
+            
+            // 新しいパラメータを設定
+            url.searchParams.set('view', 'true');
+            if (startDate) url.searchParams.set('start', startDate);
+            if (endDate) url.searchParams.set('end', endDate);
+            if (weekday !== 'all') url.searchParams.set('weekday', weekday);
+            
+            // データを圧縮して追加
+            try {
+                // データを最適化（必要なフィールドのみ保持）
+                const optimizedData = salesData.map(item => ({
+                    date: item.date,
+                    weekday: item.weekday,
+                    totalSales: item.totalSales,
+                    saunaSales: item.saunaSales,
+                    saunaCount: item.saunaCount,
+                    stayingSales: item.stayingSales,
+                    stayingCount: item.stayingCount,
+                    massageSales: item.massageSales,
+                    grillSales: item.grillSales,
+                    retailSales: item.retailSales
+                }));
+                
+                const jsonData = JSON.stringify(optimizedData);
+                const compressedData = LZString.compressToEncodedURIComponent(jsonData);
+                url.searchParams.set('data', compressedData);
+                
+                // 共有URLを表示
+                document.getElementById('shareUrl').value = url.toString();
+                
+                // モーダルを表示
+                document.getElementById('shareModal').style.display = 'flex';
+            } catch (e) {
+                console.error('データの圧縮に失敗しました:', e);
+                alert('データが大きすぎるため、共有URLの生成に失敗しました。データ量を減らしてお試しください。');
             }
         }
 
-        // 解析実行ボタンのイベントリスナー
-        document.getElementById('performAnalysisButton').addEventListener('click', () => {
-            const selectedColumnIndex = document.getElementById('dataColumnSelect').value;
-            const analysisType = document.getElementById('analysisTypeSelect').value;
+        // 共有モーダルの非表示
+        function hideShareModal() {
+            document.getElementById('shareModal').style.display = 'none';
+        }
 
-            if (!selectedColumnIndex) {
-                showMessage('解析項目を選択してください。', 'error');
-                return;
-            }
-
-            // 日付列のインデックスを探す（仮に最初の列が日付と仮定）
-            const dateColumnIndex = headers.findIndex(h => h.includes('日付') || h.toLowerCase().includes('date'));
-            if (dateColumnIndex === -1) {
-                showMessage('日付列が見つかりませんでした。データに日付を含む列があるか確認してください。', 'error');
-                return;
-            }
-
-            performAnalysis(parseInt(selectedColumnIndex), analysisType, dateColumnIndex);
-        });
-
-        // 実際の解析処理
-        function performAnalysis(columnIndex, analysisType, dateColumnIndex) {
-            const dataToProcess = allParsedData; // ヘッダーを除いたデータ
-
-            if (dataToProcess.length === 0) {
-                showMessage('解析するデータがありません。ファイルを読み込んでください。', 'error');
-                return;
-            }
-
-            let chartLabels = [];
-            let chartData = [];
-            let chartType = 'bar'; // デフォルトは棒グラフ
-            let xAxisLabel = '';
-            const dataLabel = headers[columnIndex];
-
-            if (analysisType === 'monthly') {
-                // 月ごとの合計
-                const monthlyTotals = {};
-                dataToProcess.forEach(row => {
-                    const dateStr = row[dateColumnIndex];
-                    const value = parseFloat(row[columnIndex]);
-                    if (dateStr && !isNaN(value)) {
-                        const month = moment(dateStr).format('YYYY-MM'); // 'YYYY-MM' 形式
-                        if (!monthlyTotals[month]) {
-                            monthlyTotals[month] = 0;
-                        }
-                        monthlyTotals[month] += value;
-                    }
-                });
-
-                chartLabels = Object.keys(monthlyTotals).sort();
-                chartData = chartLabels.map(month => monthlyTotals[month]);
-                chartType = 'bar';
-                xAxisLabel = '月';
-
-            } else if (analysisType === 'daily') {
-                // 日ごとの推移
-                const dailyData = [];
-                dataToProcess.forEach(row => {
-                    const dateStr = row[dateColumnIndex];
-                    const value = parseFloat(row[columnIndex]);
-                    if (dateStr && !isNaN(value)) {
-                        dailyData.push({ date: moment(dateStr).toDate(), value: value });
-                    }
-                });
-
-                // 日付でソート
-                dailyData.sort((a, b) => a.date - b.date);
-
-                chartLabels = dailyData.map(item => item.date);
-                chartData = dailyData.map(item => item.value);
-                chartType = 'line'; // 日ごとの推移は折れ線グラフ
-                xAxisLabel = '日付';
-
-            } else if (analysisType === 'weekly') {
-                // 曜日ごとの平均
-                const weeklyTotals = [0, 0, 0, 0, 0, 0, 0]; // 日, 月, 火, 水, 木, 金, 土
-                const weeklyCounts = [0, 0, 0, 0, 0, 0, 0];
-                const dayOfWeekLabels = ['日', '月', '火', '水', '木', '金', '土'];
-
-                dataToProcess.forEach(row => {
-                    const dateStr = row[dateColumnIndex];
-                    const value = parseFloat(row[columnIndex]);
-                    if (dateStr && !isNaN(value)) {
-                        const dayIndex = moment(dateStr).day(); // 0:日, 1:月, ..., 6:土
-                        weeklyTotals[dayIndex] += value;
-                        weeklyCounts[dayIndex]++;
-                    }
-                });
-
-                chartLabels = dayOfWeekLabels;
-                chartData = weeklyTotals.map((total, index) =>
-                    weeklyCounts[index] > 0 ? total / weeklyCounts[index] : 0
-                );
-                chartType = 'bar';
-                xAxisLabel = '曜日';
-            }
-
-            updateChart(chartLabels, chartData, chartType, dataLabel, xAxisLabel);
+        // 共有URLのコピー
+        function copyShareUrl() {
+            const shareUrl = document.getElementById('shareUrl');
+            shareUrl.select();
+            document.execCommand('copy');
+            
+            const copyBtn = document.getElementById('copyUrlBtn');
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = 'コピーしました！';
+            setTimeout(() => {
+                copyBtn.textContent = originalText;
+            }, 2000);
         }
     </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'95c5474376f119f1',t:'MTc1MjAzNzQ0My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
