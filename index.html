@@ -7,6 +7,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.0/dist/chartjs-adapter-moment.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -27,7 +29,7 @@
             text-align: center;
             margin-bottom: 30px;
         }
-        .input-section, .chart-section {
+        .input-section, .chart-section, .analysis-options {
             margin-bottom: 20px;
             padding: 15px;
             border: 1px solid #ddd;
@@ -39,9 +41,13 @@
             margin-bottom: 8px;
             font-weight: bold;
         }
-        input[type="file"] {
+        input[type="file"], select {
             display: block;
             margin-bottom: 15px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: calc(100% - 18px); /* paddingとborder分を考慮 */
         }
         button {
             background-color: #007bff;
@@ -52,6 +58,7 @@
             cursor: pointer;
             font-size: 16px;
             transition: background-color 0.3s ease;
+            margin-right: 10px;
         }
         button:hover {
             background-color: #0056b3;
@@ -84,6 +91,11 @@
             height: 400px; /* グラフの高さを固定 */
             width: 100%;
         }
+        .analysis-options label, .analysis-options select {
+            display: inline-block;
+            width: auto;
+            margin-right: 15px;
+        }
     </style>
 </head>
 <body>
@@ -93,8 +105,21 @@
         <div class="input-section">
             <label for="fileInput">CSVまたはExcelファイルを選択:</label>
             <input type="file" id="fileInput" accept=".csv, .xlsx, .xls">
-            <button id="analyzeButton">データを解析する</button>
+            <button id="analyzeButton">データを読み込む</button>
             <div id="message" class="message"></div>
+        </div>
+
+        <div class="analysis-options" style="display: none;"> <h2>解析オプション</h2>
+            <label for="dataColumnSelect">解析項目:</label>
+            <select id="dataColumnSelect"></select>
+
+            <label for="analysisTypeSelect">解析タイプ:</label>
+            <select id="analysisTypeSelect">
+                <option value="monthly">月ごとの合計</option>
+                <option value="daily">日ごとの推移</option>
+                <option value="weekly">曜日ごとの平均</option>
+            </select>
+            <button id="performAnalysisButton">解析を実行</button>
         </div>
 
         <div class="chart-section">
@@ -102,13 +127,15 @@
             <div class="chart-container">
                 <canvas id="myChart"></canvas>
             </div>
-            <p>※棒グラフは、「売上」列（またはそれに相当する数値データ）があることを想定しています。</p>
+            <p>※グラフは選択された項目と解析タイプに基づいて表示されます。</p>
         </div>
     </div>
 
     <script>
-        // グローバル変数としてチャートインスタンスを保持
+        // グローバル変数としてチャートインスタンスと全データ、ヘッダーを保持
         let myChartInstance = null;
+        let allParsedData = []; // ヘッダーを含む全てのパース済みデータ
+        let headers = []; // データのヘッダー
 
         // メッセージ表示関数
         function showMessage(msg, type) {
@@ -117,94 +144,76 @@
             messageDiv.className = `message ${type}`; // クラスをリセットして再設定
             messageDiv.style.display = 'block'; // 表示
             setTimeout(() => {
-                messageDiv.style.display = 'none'; // 3秒後に非表示
+                messageDiv.style.display = 'none'; // 5秒後に非表示
             }, 5000);
         }
 
         // グラフの描画/更新関数
-        function updateChart(data) {
+        function updateChart(chartLabels, chartData, chartType, dataLabel, xAxisLabel) {
             const ctx = document.getElementById('myChart').getContext('2d');
 
-            // 既存のチャートがあれば破棄
             if (myChartInstance) {
                 myChartInstance.destroy();
             }
 
-            // '売上'列を探す（または最初の数値列）
-            let labels = [];
-            let values = [];
-            let salesColumnIndex = -1;
-
-            // ヘッダー行が存在するか確認し、最初の行をヘッダーとして扱う
-            const headers = data[0];
-            if (headers && typeof headers[0] === 'string') { // 最初の要素が文字列ならヘッダーと判断
-                salesColumnIndex = headers.findIndex(header => header === '売上');
-            }
-
-            // 売上列が見つからない場合、数値を含む最初の列を探す
-            if (salesColumnIndex === -1) {
-                for (let i = 0; i < headers.length; i++) {
-                    // データ行を見て、その列が数値データを含んでいるか確認
-                    // ヘッダーの次の行から5行程度見て判断
-                    let isNumericColumn = true;
-                    for (let j = 1; j < Math.min(data.length, 6); j++) {
-                        const cellValue = data[j][i];
-                        if (cellValue === undefined || cellValue === null || isNaN(Number(cellValue))) {
-                            isNumericColumn = false;
-                            break;
-                        }
-                    }
-                    if (isNumericColumn) {
-                        salesColumnIndex = i;
-                        showMessage(`'売上'列が見つかりませんでした。代わりに'${headers[i]}'列を数値データとして使用します。`, 'success');
-                        break;
-                    }
-                }
-            }
-
-            if (salesColumnIndex === -1) {
-                showMessage('グラフ表示に必要な数値データ列が見つかりませんでした。データに「売上」列または数値データを含む列があるか確認してください。', 'error');
-                return;
-            }
-
-            // データを抽出し、数値に変換
-            labels = data.slice(1).map(row => row[0]); // 最初の列をラベルとして使用
-            values = data.slice(1).map(row => parseFloat(row[salesColumnIndex])); // 売上列を数値として使用
-
-            // グラフの描画
             myChartInstance = new Chart(ctx, {
-                type: 'bar',
+                type: chartType,
                 data: {
-                    labels: labels,
+                    labels: chartLabels,
                     datasets: [{
-                        label: headers[salesColumnIndex] || '数値データ', // ヘッダーを使用
-                        data: values,
-                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        label: dataLabel,
+                        data: chartData,
+                        backgroundColor: chartType === 'bar' ? 'rgba(75, 192, 192, 0.6)' : 'rgba(75, 192, 192, 0.2)',
                         borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1
+                        borderWidth: 1,
+                        fill: chartType === 'line' ? true : false,
+                        tension: 0.1 // 折れ線グラフの滑らかさ
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: xAxisLabel
+                            },
+                            // 日付軸の場合のオプション
+                            type: chartType === 'line' && (xAxisLabel === '日付' || xAxisLabel === '月') ? 'time' : 'category',
+                            time: {
+                                unit: xAxisLabel === '月' ? 'month' : 'day',
+                                tooltipFormat: xAxisLabel === '月' ? 'YYYY年M月' : 'YYYY/MM/DD',
+                                displayFormats: {
+                                    month: 'YYYY年M月',
+                                    day: 'YYYY/MM/DD'
+                                }
+                            }
+                        },
                         y: {
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: '値'
+                                text: dataLabel
                             }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: headers[0] || '項目' // 最初の列のヘッダーを項目名に使用
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    if (xAxisLabel === '曜日') {
+                                        const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'];
+                                        return dayOfWeek[context[0].label];
+                                    }
+                                    return context[0].label;
+                                }
                             }
                         }
                     }
                 }
             });
-            showMessage('データの解析に成功しました！', 'success');
+            showMessage('解析結果を表示しました！', 'success');
         }
 
         // ファイル読み込み処理
@@ -220,51 +229,207 @@
             const fileName = file.name;
             const fileExtension = fileName.split('.').pop().toLowerCase();
 
-            if (fileExtension === 'csv') {
-                // CSVファイルの読み込み
-                Papa.parse(file, {
-                    header: false, // 最初の行をデータとして扱うためfalse
-                    dynamicTyping: false, // 型変換は後で手動で行う
-                    complete: function(results) {
-                        if (results.errors.length) {
-                            showMessage('CSVファイルの解析中にエラーが発生しました: ' + results.errors[0].message, 'error');
-                            return;
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    let parsedData;
+                    if (fileExtension === 'csv') {
+                        // CSVファイルの読み込み
+                        const result = Papa.parse(e.target.result, {
+                            header: false, // 最初の行もデータとして扱う
+                            dynamicTyping: false,
+                            skipEmptyLines: true,
+                            // CSVのエンコーディングがShift-JISの場合
+                            // encoding: 'Shift_JIS',
+                            error: function(err) {
+                                throw new Error('CSV解析エラー: ' + err.message);
+                            }
+                        });
+                        if (result.errors.length) {
+                             throw new Error('CSV解析エラー: ' + result.errors[0].message);
                         }
-                        updateChart(results.data);
-                    },
-                    error: function(err) {
-                        showMessage('CSVファイルの読み込みに失敗しました: ' + err.message, 'error');
-                    }
-                });
-            } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-                // Excelファイルの読み込み
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    try {
+                        parsedData = result.data;
+                    } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+                        // Excelファイルの読み込み
                         const data = new Uint8Array(e.target.result);
                         const workbook = XLSX.read(data, { type: 'array' });
-                        // 最初のシートを読み込む
                         const sheetName = workbook.SheetNames[0];
                         const worksheet = workbook.Sheets[sheetName];
-                        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // 最初の行をヘッダーとしてJSONに変換
-
-                        if (json.length === 0) {
-                            showMessage('Excelファイルにデータが見つかりません。', 'error');
-                            return;
-                        }
-                        updateChart(json);
-                    } catch (error) {
-                        showMessage('Excelファイルの処理に失敗しました: ' + error.message, 'error');
+                        parsedData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                    } else {
+                        throw new Error('サポートされていないファイル形式です。CSVまたはExcelファイルを選択してください。');
                     }
-                };
-                reader.onerror = function(err) {
-                    showMessage('Excelファイルの読み込みに失敗しました: ' + err.message, 'error');
-                };
+
+                    if (parsedData.length === 0) {
+                        showMessage('ファイルにデータが見つかりません。', 'error');
+                        return;
+                    }
+
+                    // ヘッダーと実際のデータを分離
+                    headers = parsedData[0];
+                    allParsedData = parsedData.slice(1);
+
+                    // 解析オプションを表示
+                    document.querySelector('.analysis-options').style.display = 'block';
+
+                    // 解析項目ドロップダウンを更新
+                    populateColumnSelect();
+                    
+                    showMessage('データの読み込みと初期化が完了しました。解析オプションを選択してください。', 'success');
+
+                } catch (error) {
+                    showMessage('ファイルの読み込みまたは処理に失敗しました: ' + error.message, 'error');
+                    console.error('File processing error:', error);
+                }
+            };
+
+            reader.onerror = function(err) {
+                showMessage('ファイルの読み込みに失敗しました: ' + err.message, 'error');
+                console.error('FileReader error:', err);
+            };
+
+            if (fileExtension === 'csv') {
+                reader.readAsText(file);
+            } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
                 reader.readAsArrayBuffer(file);
-            } else {
-                showMessage('サポートされていないファイル形式です。CSVまたはExcelファイルを選択してください。', 'error');
             }
         });
+
+        // 解析項目（列）のドロップダウンを生成
+        function populateColumnSelect() {
+            const selectElement = document.getElementById('dataColumnSelect');
+            selectElement.innerHTML = ''; // 既存のオプションをクリア
+
+            // 除外する列名（日付列や集計対象外の列など）
+            const excludedColumns = ['日付']; // ここに日付列の正確な列名を追加
+
+            headers.forEach((header, index) => {
+                // 除外リストに含まれていない、かつヘッダーが空でない場合のみ追加
+                if (!excludedColumns.includes(header) && header.trim() !== '') {
+                    // その列が数値データを含んでいるか簡易チェック
+                    let hasNumericData = false;
+                    for (let i = 0; i < Math.min(allParsedData.length, 100); i++) { // 最初の100行をチェック
+                        const cellValue = allParsedData[i][index];
+                        if (cellValue !== undefined && cellValue !== null && !isNaN(Number(cellValue))) {
+                            hasNumericData = true;
+                            break;
+                        }
+                    }
+                    if (hasNumericData) {
+                        const option = document.createElement('option');
+                        option.value = index; // 列のインデックスを値として使用
+                        option.textContent = header;
+                        selectElement.appendChild(option);
+                    }
+                }
+            });
+
+            if (selectElement.options.length === 0) {
+                showMessage('解析可能な数値データ列が見つかりませんでした。データに数値列があるか確認してください。', 'error');
+            }
+        }
+
+        // 解析実行ボタンのイベントリスナー
+        document.getElementById('performAnalysisButton').addEventListener('click', () => {
+            const selectedColumnIndex = document.getElementById('dataColumnSelect').value;
+            const analysisType = document.getElementById('analysisTypeSelect').value;
+
+            if (!selectedColumnIndex) {
+                showMessage('解析項目を選択してください。', 'error');
+                return;
+            }
+
+            // 日付列のインデックスを探す（仮に最初の列が日付と仮定）
+            const dateColumnIndex = headers.findIndex(h => h.includes('日付') || h.toLowerCase().includes('date'));
+            if (dateColumnIndex === -1) {
+                showMessage('日付列が見つかりませんでした。データに日付を含む列があるか確認してください。', 'error');
+                return;
+            }
+
+            performAnalysis(parseInt(selectedColumnIndex), analysisType, dateColumnIndex);
+        });
+
+        // 実際の解析処理
+        function performAnalysis(columnIndex, analysisType, dateColumnIndex) {
+            const dataToProcess = allParsedData; // ヘッダーを除いたデータ
+
+            if (dataToProcess.length === 0) {
+                showMessage('解析するデータがありません。ファイルを読み込んでください。', 'error');
+                return;
+            }
+
+            let chartLabels = [];
+            let chartData = [];
+            let chartType = 'bar'; // デフォルトは棒グラフ
+            let xAxisLabel = '';
+            const dataLabel = headers[columnIndex];
+
+            if (analysisType === 'monthly') {
+                // 月ごとの合計
+                const monthlyTotals = {};
+                dataToProcess.forEach(row => {
+                    const dateStr = row[dateColumnIndex];
+                    const value = parseFloat(row[columnIndex]);
+                    if (dateStr && !isNaN(value)) {
+                        const month = moment(dateStr).format('YYYY-MM'); // 'YYYY-MM' 形式
+                        if (!monthlyTotals[month]) {
+                            monthlyTotals[month] = 0;
+                        }
+                        monthlyTotals[month] += value;
+                    }
+                });
+
+                chartLabels = Object.keys(monthlyTotals).sort();
+                chartData = chartLabels.map(month => monthlyTotals[month]);
+                chartType = 'bar';
+                xAxisLabel = '月';
+
+            } else if (analysisType === 'daily') {
+                // 日ごとの推移
+                const dailyData = [];
+                dataToProcess.forEach(row => {
+                    const dateStr = row[dateColumnIndex];
+                    const value = parseFloat(row[columnIndex]);
+                    if (dateStr && !isNaN(value)) {
+                        dailyData.push({ date: moment(dateStr).toDate(), value: value });
+                    }
+                });
+
+                // 日付でソート
+                dailyData.sort((a, b) => a.date - b.date);
+
+                chartLabels = dailyData.map(item => item.date);
+                chartData = dailyData.map(item => item.value);
+                chartType = 'line'; // 日ごとの推移は折れ線グラフ
+                xAxisLabel = '日付';
+
+            } else if (analysisType === 'weekly') {
+                // 曜日ごとの平均
+                const weeklyTotals = [0, 0, 0, 0, 0, 0, 0]; // 日, 月, 火, 水, 木, 金, 土
+                const weeklyCounts = [0, 0, 0, 0, 0, 0, 0];
+                const dayOfWeekLabels = ['日', '月', '火', '水', '木', '金', '土'];
+
+                dataToProcess.forEach(row => {
+                    const dateStr = row[dateColumnIndex];
+                    const value = parseFloat(row[columnIndex]);
+                    if (dateStr && !isNaN(value)) {
+                        const dayIndex = moment(dateStr).day(); // 0:日, 1:月, ..., 6:土
+                        weeklyTotals[dayIndex] += value;
+                        weeklyCounts[dayIndex]++;
+                    }
+                });
+
+                chartLabels = dayOfWeekLabels;
+                chartData = weeklyTotals.map((total, index) =>
+                    weeklyCounts[index] > 0 ? total / weeklyCounts[index] : 0
+                );
+                chartType = 'bar';
+                xAxisLabel = '曜日';
+            }
+
+            updateChart(chartLabels, chartData, chartType, dataLabel, xAxisLabel);
+        }
     </script>
 </body>
 </html>
