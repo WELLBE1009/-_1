@@ -3,114 +3,1850 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>施設売上分析ダッシュボード</title>
+    <title>施設売上分析ダッシュボード (前年比較版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
+    <style>
+        body {
+            font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
+            background-color: #f0f4f8;
+        }
+        .card {
+            background-color: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+        .btn-primary {
+            background-color: #3b82f6;
+            color: white;
+            transition: background-color 0.2s;
+        }
+        .btn-primary:hover {
+            background-color: #2563eb;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .chart-container-large {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
+            color: white;
+        }
+        .summary-card-alt {
+            background: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+            color: white;
+        }
+        .weekday-0 { background-color: rgba(239, 68, 68, 0.1); } /* Sunday */
+        .weekday-6 { background-color: rgba(59, 130, 246, 0.1); } /* Saturday */
+        textarea {
+            resize: none;
+        }
+        #shareModal, #messageBox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            max-width: 90%;
+            width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        /* Reinstated original comparison-positive and comparison-negative classes */
+        .comparison-positive {
+            color: #10B981; /* Green-500 */
+        }
+        .comparison-negative {
+            color: #EF4444; /* Red-500 */
+        }
+        /* New class for black text */
+        .text-black-force {
+            color: #1f2937; /* Equivalent to Tailwind's text-gray-800 */
+        }
+        .summary-value {
+            font-size: 1.875rem; /* text-3xl */
+            font-weight: 700; /* font-bold */
+            margin-top: 0.5rem; /* mt-2 */
+        }
+        .summary-detail {
+            font-size: 0.875rem; /* text-sm */
+            margin-top: 0.25rem; /* mt-1 */
+            opacity: 0.9;
+        }
+        .service-summary-value {
+            font-size: 1.5rem; /* text-2xl */
+            font-weight: 700; /* font-bold */
+            margin-top: 0.25rem; /* mt-1 */
+        }
+        .service-summary-detail {
+            font-size: 0.75rem; /* text-xs */
+            margin-top: 0.25rem; /* mt-1 */
+            opacity: 0.9;
+        }
+        #skippedRowsWarning {
+            display: none;
+            background-color: #fef2f2; /* Red-50 */
+            border-left: 4px solid #ef4444; /* Red-500 */
+            color: #b91c1c; /* Red-800 */
+            padding: 1rem;
+            border-radius: 0.25rem;
+            margin-bottom: 1rem;
+        }
+    </style>
 </head>
 <body>
-  <!-- ここに入力セクション、フィルター、チャート、テーブルなどUIが続きます（省略） -->
+    <div class="min-h-screen p-4 md:p-8">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">施設売上分析ダッシュボード (前年比較版)</h1>
+                <p class="text-gray-600 mt-2">日別データから自動生成されたインタラクティブな分析ツール</p>
+            </div>
+            <div id="dataInputSection">
+                <button id="shareBtn" class="btn-primary px-4 py-2 rounded-md">分析結果を共有</button>
+            </div>
+        </header>
 
-  <!-- 以下にJavaScript部分を全てまとめて記述 -->
-  <script>
-    // --- 変数と初期設定 ---
-    let currentYearSalesData = [];
-    let previousYearSalesData = [];
-    let filteredCurrentYearData = [];
-    let filteredPreviousYearData = [];
-    let charts = {};
-    let isViewMode = false;
+        <div class="mb-8" id="inputSection">
+            <div class="card p-4 md:p-6">
+                <h2 class="text-xl font-semibold mb-4">データを入力</h2>
+                <p class="text-gray-600 mb-4">以下のテキストエリアに当期データと前年データを貼り付けてください。<br>
+                **重要: 「対象日」の列はすべての行で必須です。**<br>
+                必要な列: 対象日, 曜日, 売上日計, サウナ, 人数（S), 宿泊売上計, 人数(C), マッサージ, グリ, 物販</p>
+                
+                <div class="flex flex-col gap-4">
+                    <div>
+                        <label for="currentYearDataInput" class="block text-sm font-medium text-gray-700 mb-1">当期データ</label>
+                        <textarea id="currentYearDataInput" rows="6" class="w-full p-2 border border-gray-300 rounded-md" placeholder="ここに当期データを貼り付けてください（CSVまたはタブ区切り形式）"></textarea>
+                    </div>
+                    <div>
+                        <label for="previousYearDataInput" class="block text-sm font-medium text-gray-700 mb-1">前年データ (任意)</label>
+                        <textarea id="previousYearDataInput" rows="6" class="w-full p-2 border border-gray-300 rounded-md" placeholder="ここに前年データを貼り付けてください（CSVまたはタブ区切り形式）"></textarea>
+                    </div>
+                    
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <button id="processDataBtn" class="btn-primary px-4 py-2 rounded-md">データを分析</button>
+                        <button id="loadSampleBtn" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-md">サンプルデータを読み込む</button>
+                    </div>
+                </div>
+                
+                <div id="fileStatus" class="mt-4 hidden">
+                    <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm text-blue-700" id="fileStatusText">
+                                    データを処理中...
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-    // --- 共有URLパラメータの読み取りと初期化 ---
-    function checkUrlParams() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const viewMode = urlParams.get('view');
-      const startDate = urlParams.get('start');
-      const endDate = urlParams.get('end');
-      const weekday = urlParams.get('weekday');
-      const compressedCurrentData = urlParams.get('current_data');
-      const compressedPreviousData = urlParams.get('previous_data');
+        <div id="dashboardContent" class="hidden">
+            <!-- スキップされた行の警告 -->
+            <div id="skippedRowsWarning" class="mb-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800">データ処理に関する警告</h3>
+                        <p class="mt-2 text-sm text-red-700" id="skippedRowsWarningText"></p>
+                    </div>
+                </div>
+            </div>
 
-      if (viewMode === 'true') {
-        isViewMode = true;
-        document.getElementById('inputSection').style.display = 'none';
+            <!-- フィルターセクション -->
+            <div class="card p-4 md:p-6 mb-8">
+                <h2 class="text-xl font-semibold mb-4">期間フィルター</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">期間</label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <input type="date" id="startDate" class="flex-1 p-2 border border-gray-300 rounded-md">
+                            <span class="flex items-center justify-center">～</span>
+                            <input type="date" id="endDate" class="flex-1 p-2 border border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">曜日</label>
+                        <select id="weekdayFilter" class="w-1/2 p-2 border border-gray-300 rounded-md">
+                            <option value="all">すべて</option>
+                            <option value="月">月曜日</option>
+                            <option value="火">火曜日</option>
+                            <option value="水">水曜日</option>
+                            <option value="木">木曜日</option>
+                            <option value="金">金曜日</option>
+                            <option value="土">土曜日</option>
+                            <option value="日">日曜日</option>
+                        </select>
+                    </div>
+                    <div class="flex items-end">
+                        <button id="applyFilterBtn" class="btn-primary px-4 py-2 rounded-md w-full">フィルターを適用</button>
+                    </div>
+                </div>
+            </div>
 
-        if (startDate) document.getElementById('startDate').value = startDate;
-        if (endDate) document.getElementById('endDate').value = endDate;
-        if (weekday) document.getElementById('weekdayFilter').value = weekday;
+            <!-- サマリーカード -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <div class="summary-card card p-4">
+                    <h3 class="text-lg font-medium opacity-80">総売上</h3>
+                    <p class="summary-value" id="totalSalesSummary"></p>
+                </div>
+                <div class="summary-card-alt card p-4">
+                    <h3 class="text-lg font-medium opacity-80">サウナ利用者数</h3>
+                    <p class="summary-value" id="totalSaunaCountSummary"></p>
+                </div>
+                <div class="summary-card card p-4">
+                    <h3 class="text-lg font-medium opacity-80">宿泊者数</h3>
+                    <p class="summary-value" id="totalStayingCountSummary"></p>
+                </div>
+                <div class="summary-card-alt card p-4">
+                    <h3 class="text-lg font-medium opacity-80">平均客単価</h3>
+                    <p class="summary-value" id="averagePriceSummary"></p>
+                </div>
+            </div>
 
-        document.getElementById('shareBtn').textContent = 'データを編集';
-        document.getElementById('shareBtn').addEventListener('click', () => location.href = location.pathname);
+            <!-- サービス別サマリー -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+                <div class="card p-4 bg-blue-50">
+                    <h3 class="text-md font-medium text-blue-800">サウナ売上</h3>
+                    <p class="service-summary-value" id="saunaSalesSummary"></p>
+                    <p class="service-summary-detail" id="saunaSalesPercent"></p>
+                </div>
+                <div class="card p-4 bg-indigo-50">
+                    <h3 class="text-md font-medium text-indigo-800">宿泊売上</h3>
+                    <p class="service-summary-value" id="stayingSalesSummary"></p>
+                    <p class="service-summary-detail" id="stayingSalesPercent"></p>
+                </div>
+                <div class="card p-4 bg-purple-50">
+                    <h3 class="text-md font-medium text-purple-800">マッサージ売上</h3>
+                    <p class="service-summary-value" id="massageSalesSummary"></p>
+                    <p class="service-summary-detail" id="massageSalesPercent"></p>
+                </div>
+                <div class="card p-4 bg-green-50">
+                    <h3 class="text-md font-medium text-green-800">グリル売上</h3>
+                    <p class="service-summary-value" id="grillSalesSummary"></p>
+                    <p class="service-summary-detail" id="grillSalesPercent"></p>
+                </div>
+                <div class="card p-4 bg-amber-50">
+                    <h3 class="text-md font-medium text-amber-800">物販売上</h3>
+                    <p class="service-summary-value" id="retailSalesSummary"></p>
+                    <p class="service-summary-detail" id="retailSalesPercent"></p>
+                </div>
+            </div>
 
-        if (compressedCurrentData) {
-          try {
-            const decompressedCurrentData = LZString.decompressFromEncodedURIComponent(compressedCurrentData);
-            currentYearSalesData = JSON.parse(decompressedCurrentData || '[]');
-          } catch (e) {
-            alert('当期データの読み込みに失敗しました');
-          }
+            <!-- チャートセクション -->
+            <div class="card p-4 md:p-6 mb-8">
+                <h2 class="text-xl font-semibold mb-4">日別売上推移</h2>
+                <div class="chart-container-large">
+                    <canvas id="dailySalesChart"></canvas>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">サービス別売上構成（当期）</h2>
+                    <div class="chart-container">
+                        <canvas id="serviceSalesChart"></canvas>
+                    </div>
+                </div>
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">人数と売上の相関（当期）</h2>
+                    <div class="chart-container">
+                        <canvas id="correlationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">曜日別サウナ利用分布</h2>
+                    <div class="chart-container">
+                        <canvas id="weekdaySaunaChart"></canvas>
+                    </div>
+                </div>
+                <div class="card p-4 md:p-6">
+                    <h2 class="text-xl font-semibold mb-4">曜日別宿泊利用分布</h2>
+                    <div class="chart-container">
+                        <canvas id="weekdayStayingChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- データテーブル -->
+            <div class="card p-4 md:p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">日別データ</h2>
+                    <button id="exportCsvBtn" class="btn-primary px-4 py-2 rounded-md">CSVエクスポート</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日付</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">曜日</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">売上日計 (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">売上日計 (前年)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">総売上 前年比 (%)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">サウナ売上 (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">サウナ売上 前年比 (%)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">サウナ人数 (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">宿泊売上 (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">宿泊売上 前年比 (%)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">宿泊人数 (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">マッサージ (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">マッサージ 前年比 (%)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">グリル (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">グリル 前年比 (%)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">物販 (当期)</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">物販 前年比 (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- データ行がここに入ります -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-4 flex justify-between items-center">
+                    <div class="text-sm text-gray-700" id="tableInfo">
+                        0件中 1-0件を表示
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="prevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md disabled:opacity-50">前へ</button>
+                        <button id="nextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md disabled:opacity-50">次へ</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 共有モーダル -->
+    <div id="shareModal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">分析結果を共有</h2>
+                <button id="closeModalBtn" class="text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <p class="mb-4">以下のURLを共有すると、現在の分析結果を他の人と共有できます。</p>
+            <div class="flex mb-4">
+                <input id="shareUrl" type="text" class="flex-1 p-2 border border-gray-300 rounded-l-md" readonly>
+                <button id="copyUrlBtn" class="btn-primary px-4 py-2 rounded-r-md">コピー</button>
+            </div>
+            <div class="mt-4 text-sm text-gray-600">
+                <p>※ 共有URLには入力データが含まれています。共有先でデータの入力は不要です。</p>
+                <p>※ 長期間の保存には適していません。データ量が多い場合はURLが長くなります。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- カスタムメッセージボックス -->
+    <div id="messageBox">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-red-600">データ処理に関する注意</h2>
+                <button id="closeMessageBoxBtn" class="text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <p id="messageBoxText" class="mb-4 text-gray-700"></p>
+            <p class="text-sm text-gray-600">
+                日付が空欄の行は分析から除外されます。正確な分析のため、データ入力時に「対象日」が正しく入力されていることをご確認ください。
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // グローバル変数
+        let currentYearSalesData = [];
+        let previousYearSalesData = [];
+        let filteredCurrentYearData = [];
+        let filteredPreviousYearData = []; // 前年データを格納
+        let currentPage = 1;
+        const rowsPerPage = 10;
+        let charts = {};
+        let isViewMode = false;
+
+        // 曜日の順序マッピング（ソート用）
+        const weekdayOrder = {
+            '月': 0,
+            '火': 1,
+            '水': 2,
+            '木': 3,
+            '金': 4,
+            '土': 5,
+            '日': 6
+        };
+
+        // DOMが読み込まれたら実行
+        document.addEventListener('DOMContentLoaded', function() {
+            // イベントリスナーの設定
+            document.getElementById('processDataBtn').addEventListener('click', processAllInputData);
+            document.getElementById('loadSampleBtn').addEventListener('click', loadSampleData);
+            document.getElementById('applyFilterBtn').addEventListener('click', applyFilters);
+            document.getElementById('exportCsvBtn').addEventListener('click', exportToCsv);
+            document.getElementById('prevPageBtn').addEventListener('click', () => changePage(-1));
+            document.getElementById('nextPageBtn').addEventListener('click', () => changePage(1));
+            document.getElementById('shareBtn').addEventListener('click', showShareModal);
+            document.getElementById('closeModalBtn').addEventListener('click', hideShareModal);
+            document.getElementById('copyUrlBtn').addEventListener('click', copyShareUrl);
+            document.getElementById('closeMessageBoxBtn').addEventListener('click', hideMessageBox); // カスタムメッセージボックスの閉じるボタン
+
+            // URLパラメータをチェック
+            checkUrlParams();
+        });
+
+        // カスタムメッセージボックスの表示
+        function showMessageBox(message) {
+            document.getElementById('messageBoxText').textContent = message;
+            document.getElementById('messageBox').style.display = 'flex';
         }
 
-        if (compressedPreviousData) {
-          try {
-            const decompressedPreviousData = LZString.decompressFromEncodedURIComponent(compressedPreviousData);
-            previousYearSalesData = JSON.parse(decompressedPreviousData || '[]');
-          } catch (e) {
-            alert('前年データの読み込みに失敗しました');
-          }
+        // カスタムメッセージボックスの非表示
+        function hideMessageBox() {
+            document.getElementById('messageBox').style.display = 'none';
         }
 
-        if (currentYearSalesData.length > 0) {
-          currentYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
-          previousYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
-          setupDateRange();
-          applyFilters();
-          document.getElementById('dashboardContent').classList.remove('hidden');
+        // URLパラメータのチェック
+        function checkUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const viewMode = urlParams.get('view');
+            const startDate = urlParams.get('start');
+            const endDate = urlParams.get('end');
+            const weekday = urlParams.get('weekday');
+            const compressedCurrentData = urlParams.get('current_data');
+            const compressedPreviousData = urlParams.get('previous_data');
+
+            if (viewMode === 'true') {
+                isViewMode = true;
+                // 入力セクションを非表示
+                document.getElementById('inputSection').style.display = 'none';
+
+                // フィルター設定を復元
+                if (startDate) document.getElementById('startDate').value = startDate;
+                if (endDate) document.getElementById('endDate').value = endDate;
+                if (weekday) document.getElementById('weekdayFilter').value = weekday;
+
+                // 共有ボタンのテキストを変更
+                document.getElementById('shareBtn').textContent = 'データを編集';
+                document.getElementById('shareBtn').addEventListener('click', function() {
+                    window.location.href = window.location.pathname;
+                });
+
+                // 圧縮データがある場合は復元
+                if (compressedCurrentData) {
+                    try {
+                        const decompressedCurrentData = LZString.decompressFromEncodedURIComponent(compressedCurrentData);
+                        if (decompressedCurrentData) {
+                            currentYearSalesData = JSON.parse(decompressedCurrentData);
+                            currentYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
+                        }
+                    } catch (e) {
+                        console.error('当期データの復元に失敗しました:', e);
+                        showMessageBox('共有データの読み込みに失敗しました。URLが正しいか確認してください。');
+                    }
+                }
+                if (compressedPreviousData) {
+                    try {
+                        const decompressedPreviousData = LZString.decompressFromEncodedURIComponent(compressedPreviousData);
+                        if (decompressedPreviousData) {
+                            previousYearSalesData = JSON.parse(decompressedPreviousData);
+                            previousYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
+                        }
+                    } catch (e) {
+                        console.error('前年データの復元に失敗しました:', e);
+                        showMessageBox('共有データの読み込みに失敗しました。URLが正しいか確認してください。');
+                    }
+                }
+
+                if (currentYearSalesData.length > 0) {
+                    setupDateRange();
+                    applyFilters();
+                    document.getElementById('dashboardContent').classList.remove('hidden');
+                }
+            }
         }
-      }
-    }
 
-    // --- チャート作成（5月1日対応） ---
-    function createDailySalesChart() {
-      const sortedCurrentData = [...filteredCurrentYearData].sort((a, b) => a.date.localeCompare(b.date));
-      const sortedPreviousData = [...filteredPreviousYearData].sort((a, b) => a.date.localeCompare(b.date));
+        // 全ての入力データを処理
+        function processAllInputData() {
+            const currentYearText = document.getElementById('currentYearDataInput').value.trim();
+            const previousYearText = document.getElementById('previousYearDataInput').value.trim();
 
-      const labels = sortedCurrentData.map(item => {
-        const d = new Date(item.date);
-        return `${d.getMonth() + 1}/${d.getDate()}`;
-      });
+            // 既存の警告を非表示にする
+            document.getElementById('skippedRowsWarning').style.display = 'none';
+            hideMessageBox();
 
-      const baseYear = sortedCurrentData.length > 0 ? new Date(sortedCurrentData[0].date).getFullYear() : new Date().getFullYear();
+            if (!currentYearText) {
+                showMessageBox('当期データを入力してください');
+                return;
+            }
 
-      const totalSalesCurrent = sortedCurrentData.map(item => item.totalSales);
-      const totalSalesPrevious = labels.map(label => {
-        const [m, d] = label.split('/').map(Number);
-        const prevDate = new Date(baseYear - 1, m - 1, d).toISOString().split('T')[0];
-        const prev = sortedPreviousData.find(item => item.date === prevDate);
-        return prev ? prev.totalSales : NaN;
-      });
+            const fileStatus = document.getElementById('fileStatus');
+            const fileStatusText = document.getElementById('fileStatusText');
+            fileStatus.classList.remove('hidden');
+            fileStatusText.textContent = `データを処理中...`;
 
-      const ctx = document.getElementById('dailySalesChart').getContext('2d');
-      charts.dailySales = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            { label: '総売上 (当期)', data: totalSalesCurrent, borderColor: 'blue', borderWidth: 2, fill: false },
-            { label: '総売上 (前年)', data: totalSalesPrevious, borderColor: 'red', borderWidth: 2, borderDash: [5, 5], fill: false }
-          ]
-        },
-        options: {
-          responsive: true,
-          plugins: { legend: { position: 'top' } },
-          scales: { y: { beginAtZero: true } }
+            try {
+                let skippedCurrentRows = 0;
+                let skippedPreviousRows = 0;
+
+                // 当期データを処理
+                currentYearSalesData = parseAndProcessData(currentYearText, (skippedCount) => {
+                    skippedCurrentRows = skippedCount;
+                });
+                currentYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
+                
+                // 前年データを処理 (任意)
+                previousYearSalesData = [];
+                if (previousYearText) {
+                    previousYearSalesData = parseAndProcessData(previousYearText, (skippedCount) => {
+                        skippedPreviousRows = skippedCount;
+                    });
+                    previousYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
+                }
+
+                if (currentYearSalesData.length === 0) {
+                    document.getElementById('fileStatusText').textContent = "有効な当期データが見つかりませんでした。データ形式を確認してください。";
+                    return;
+                }
+
+                setupDateRange();
+                applyFilters();
+                document.getElementById('dashboardContent').classList.remove('hidden');
+                
+                let statusMessage = `${currentYearSalesData.length}件の当期データを読み込みました。`;
+                if (previousYearSalesData.length > 0) {
+                    statusMessage += `${previousYearSalesData.length}件の前年データを読み込みました。`;
+                }
+                document.getElementById('fileStatusText').textContent = statusMessage;
+
+                if (skippedCurrentRows > 0 || skippedPreviousRows > 0) {
+                    let warningMessage = '';
+                    if (skippedCurrentRows > 0) {
+                        warningMessage += `当期データで**${skippedCurrentRows}行**が日付の欠損によりスキップされました。`;
+                    }
+                    if (skippedPreviousRows > 0) {
+                        if (warningMessage) warningMessage += '<br>'; // HTML改行
+                        warningMessage += `前年データで**${skippedPreviousRows}行**が日付の欠損によりスキップされました。`;
+                    }
+                    document.getElementById('skippedRowsWarningText').innerHTML = warningMessage;
+                    document.getElementById('skippedRowsWarning').style.display = 'block'; // 警告を表示
+                }
+
+            } catch (error) {
+                fileStatusText.textContent = `エラー: ${error.message}`;
+                console.error('データ処理エラー:', error);
+                showMessageBox(`データ処理中にエラーが発生しました: ${error.message}`);
+            }
         }
-      });
-    }
 
-    // --- 呼び出し ---
-    document.addEventListener('DOMContentLoaded', checkUrlParams);
-  </script>
+        // CSV/タブ区切りテキストをパースして構造化データに変換する関数
+        function parseAndProcessData(inputText, onSkipCallback) {
+            const delimiter = inputText.includes('\t') ? '\t' : ',';
+            const lines = inputText.split(/\r?\n/).filter(line => line.trim());
+            if (lines.length === 0) return [];
+
+            const headers = lines[0].split(delimiter).map(h => h.trim());
+            const data = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(delimiter);
+                if (values.length !== headers.length) {
+                    console.warn(`ヘッダー数と値の数が一致しない行をスキップしました: 行 ${i + 1}, データ: "${lines[i]}"`);
+                    continue; // ヘッダー数と値の数が一致しない行はスキップ
+                }
+                
+                const row = {};
+                headers.forEach((header, index) => {
+                    row[header] = values[index].trim();
+                });
+                data.push(row);
+            }
+            
+            let skippedRowsCount = 0;
+            const processedResult = processRawData(data, (isSkipped) => {
+                if (isSkipped) skippedRowsCount++;
+            });
+            
+            console.log(`パースされた生データ行数: ${data.length} (ヘッダー行を除く)`);
+            console.log(`処理された有効なデータ行数 (日付解析成功): ${processedResult.length}`);
+            if (onSkipCallback) {
+                onSkipCallback(skippedRowsCount);
+            }
+            return processedResult;
+        }
+
+        // サンプルデータの読み込み
+        function loadSampleData() {
+            const fileStatus = document.getElementById('fileStatus');
+            const fileStatusText = document.getElementById('fileStatusText');
+            
+            // 既存の警告を非表示にする
+            document.getElementById('skippedRowsWarning').style.display = 'none';
+            hideMessageBox();
+
+            fileStatus.classList.remove('hidden');
+            fileStatusText.textContent = "サンプルデータを読み込み中...";
+
+            // 当期サンプルデータ
+            currentYearSalesData = generateSampleData(new Date().getFullYear());
+            // 前年サンプルデータ
+            previousYearSalesData = generateSampleData(new Date().getFullYear() - 1);
+            
+            // サンプルデータをテキストエリアに表示
+            document.getElementById('currentYearDataInput').value = formatSampleDataForDisplay(currentYearSalesData);
+            document.getElementById('previousYearDataInput').value = formatSampleDataForDisplay(previousYearSalesData);
+
+            currentYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
+            previousYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
+
+            setupDateRange();
+            applyFilters();
+
+            // ダッシュボードを表示
+            document.getElementById('dashboardContent').classList.remove('hidden');
+            fileStatusText.textContent = `${currentYearSalesData.length}件の当期サンプルデータを読み込みました。${previousYearSalesData.length}件の前年サンプルデータを読み込みました。`;
+        }
+
+        // サンプルデータをテキストエリア表示用にフォーマット
+        function formatSampleDataForDisplay(data) {
+            if (!data || data.length === 0) return '';
+            // ヘッダー行
+            const headers = ['対象日', '曜日', '売上日計', 'サウナ', '人数（S)', '宿泊売上計', '人数(C)', 'マッサージ', 'グリ', '物販'];
+            // データ行
+            const rows = data.map(item => {
+                // 日付をYYYY-MM-DD からYYYY/MM/DD に変換
+                const formattedDate = item.date.replace(/-/g, '/');
+                
+                return [
+                    formattedDate,
+                    item.weekday,
+                    item.totalSales,
+                    item.saunaSales,
+                    item.saunaCount,
+                    item.stayingSales,
+                    item.stayingCount,
+                    item.massageSales,
+                    item.grillSales,
+                    item.retailSales
+                ];
+            });
+            // タブ区切りで結合
+            return [headers.join('\t')].concat(rows.map(row => row.join('\t'))).join('\n');
+        }
+
+        // サンプルデータの生成 (指定された年で)
+        function generateSampleData(year) {
+            const data = [];
+            const weekdays = ['日', '月', '火', '水', '木', '金', '土']; // Date.getDay()に対応
+            
+            const startDate = new Date(year, 0, 1); // 1月1日
+            const endDate = new Date(year, 11, 31); // 12月31日
+            
+            // 基本料金設定
+            const baseSettings = {
+                saunaPrice: 1500,
+                stayingPrice: 6000,
+                massagePrice: 4000,
+                grillAvg: 1200,
+                retailAvg: 800
+            };
+
+            // 曜日係数（土日は混む）
+            const weekdayFactor = {
+                '月': 0.7,
+                '火': 0.6,
+                '水': 0.7,
+                '木': 0.8,
+                '金': 1.0,
+                '土': 1.5,
+                '日': 1.3
+            };
+
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                const weekday = weekdays[d.getDay()];
+                const factor = weekdayFactor[weekday];
+                // 季節係数（月によって変動）
+                const monthFactor = 1 + (Math.sin(d.getMonth() / 2) * 0.2);
+                // ランダム係数（日によるばらつき）
+                const randomFactor = 0.8 + (Math.random() * 0.4);
+                // 総合係数
+                const totalFactor = factor * monthFactor * randomFactor;
+
+                // サウナ利用者数
+                const saunaCount = Math.round(40 * totalFactor);
+                // 宿泊者数（サウナ利用者の一部）
+                const stayingCount = Math.round(saunaCount * 0.15);
+
+                // 各売上の計算
+                const saunaSales = saunaCount * baseSettings.saunaPrice;
+                const stayingSales = stayingCount * baseSettings.stayingPrice;
+                const massageSales = Math.round(saunaCount * 0.2) * baseSettings.massagePrice;
+                const grillSales = Math.round(saunaCount * 0.6) * baseSettings.grillAvg;
+                const retailSales = Math.round(saunaCount * 0.3) * baseSettings.retailAvg;
+                // 総売上
+                const totalSales = saunaSales + stayingSales + massageSales + grillSales + retailSales;
+
+                data.push({
+                    date: d.toISOString().split('T')[0],
+                    weekday: weekday,
+                    totalSales: Math.round(totalSales),
+                    saunaSales: Math.round(saunaSales),
+                    saunaCount: saunaCount,
+                    stayingSales: Math.round(stayingSales),
+                    stayingCount: stayingCount,
+                    massageSales: Math.round(massageSales),
+                    grillSales: Math.round(grillSales),
+                    retailSales: Math.round(retailSales)
+                });
+            }
+
+            return data;
+        }
+
+        // 日付文字列を標準形式（YYYY-MM-DD）に変換する関数
+        function parseAndFormatDate(dateStr) {
+            if (!dateStr) return null;
+            // 日付文字列を正規化（区切り文字を統一）
+            dateStr = String(dateStr).trim()
+                .replace(/[年月]/g, '/')
+                .replace(/日/g, '')
+                .replace(/\s+/g, '');
+            let parsedDate;
+            
+            // YYYY/MM/DD またはYYYY-MM-DD 形式
+            if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(dateStr)) {
+                const parts = dateStr.split(/[/-]/);
+                parsedDate = new Date(parts[0], parts[1] - 1, parts[2]);
+            }
+            // MM/DD/YYYY 形式
+            else if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(dateStr)) {
+                const parts = dateStr.split(/[/-]/);
+                parsedDate = new Date(parts[2], parts[0] - 1, parts[1]);
+            }
+            // DD/MM/YYYY 形式（日本では少ないが一応）
+            else if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(dateStr)) {
+                const parts = dateStr.split(/[/-]/);
+                parsedDate = new Date(parts[2], parts[1] - 1, parts[0]);
+            }
+            // YYYYMMDD 形式
+            else if (/^\d{8}$/.test(dateStr)) {
+                const year = dateStr.substring(0, 4);
+                const month = dateStr.substring(4, 6);
+                const day = dateStr.substring(6, 8);
+                parsedDate = new Date(year, month - 1, day);
+            }
+            // その他の形式は直接 Date コンストラクタで試す
+            else {
+                parsedDate = new Date(dateStr);
+            }
+            
+            // 日付が有効かチェック
+            if (isNaN(parsedDate.getTime())) {
+                console.warn(`無効な日付形式: ${dateStr}`);
+                return null;
+            }
+            
+            // YYYY-MM-DD 形式に変換
+            const year = parsedDate.getFullYear();
+            const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+            const day = String(parsedDate.getDate()).padStart(2, '0');
+            
+            return `${year}-${month}-${day}`;
+        }
+
+        // 生データを行ごとに処理
+        function processRawData(data, onSkipCallback) {
+            const processedData = [];
+            data.forEach((row, index) => { // Added index for better logging
+                try {
+                    // 日付の処理
+                    let dateValue = row['対象日'] || row['日付'] || Object.values(row)[0];
+                    const formattedDate = parseAndFormatDate(dateValue);
+                    
+                    if (!formattedDate) {
+                        console.error(`日付の解析に失敗し、行をスキップしました: 行 ${index + 2}, 日付値: "${dateValue}", 元の行データ:`, row); // +2 for 0-indexed array + header
+                        if (onSkipCallback) onSkipCallback(true);
+                        return; // この行はスキップ
+                    }
+
+                    // 数値の処理（カンマや通貨記号を除去）
+                    const parseNumeric = (value) => {
+                        if (value === undefined || value === null || value === '') return 0;
+                        if (typeof value === 'number') return value;
+                        return Number(String(value).replace(/[^\d.-]/g, '')) || 0;
+                    };
+
+                    // 各フィールドの取得（複数の可能性のある列名をチェック）
+                    const weekday = row['曜日'] || '';
+                    const totalSales = parseNumeric(row['売上日計'] || row['売上合計'] || row['総売上']);
+                    const saunaSales = parseNumeric(row['サウナ'] || row['サウナ売上']);
+                    
+                    let saunaCount = 0;
+                    for (const key of Object.keys(row)) {
+                        if (key.includes('人数') && (key.includes('S') || key.includes('s') || key.toLowerCase().includes('sauna'))) {
+                            saunaCount = parseNumeric(row[key]);
+                            break;
+                        }
+                    }
+                    if (saunaCount === 0) { // バックアップ
+                        saunaCount = parseNumeric(row['サウナ人数'] || row['サウナ利用者数']);
+                    }
+                    
+                    const stayingSales = parseNumeric(row['宿泊売上計'] || row['宿泊売上'] || row['宿泊']);
+                    
+                    let stayingCount = 0;
+                    for (const key of Object.keys(row)) {
+                        if (key.includes('人数') && (key.includes('C') || key.includes('c') || key.toLowerCase().includes('stay'))) {
+                            stayingCount = parseNumeric(row[key]);
+                            break;
+                        }
+                    }
+                    if (stayingCount === 0) { // バックアップ
+                        stayingCount = parseNumeric(row['宿泊人数'] || row['宿泊者数']);
+                    }
+                    
+                    const massageSales = parseNumeric(row['マッサージ'] || row['マッサージ売上']);
+                    const grillSales = parseNumeric(row['グリ'] || row['グリル'] || row['グリル売上']);
+                    const retailSales = parseNumeric(row['物販'] || row['物販売上']);
+
+                    processedData.push({
+                        date: formattedDate,
+                        weekday: weekday,
+                        totalSales: totalSales,
+                        saunaSales: saunaSales,
+                        saunaCount: saunaCount,
+                        stayingSales: stayingSales,
+                        stayingCount: stayingCount,
+                        massageSales: massageSales,
+                        grillSales: grillSales,
+                        retailSales: retailSales
+                    });
+                } catch (e) {
+                    console.error(`行 ${index + 2} の処理中にエラー:`, e, "行データ:", row);
+                    if (onSkipCallback) onSkipCallback(true);
+                }
+            });
+            return processedData.filter(item => item && item.date); // 無効な行を除外
+        }
+
+
+        // 日付範囲の設定
+        function setupDateRange() {
+            const dates = currentYearSalesData.map(item => new Date(item.date));
+            const validDates = dates.filter(date => !isNaN(date.getTime()));
+
+            if (validDates.length > 0) {
+                const minDate = new Date(Math.min(...validDates));
+                const maxDate = new Date(Math.max(...validDates));
+                document.getElementById('startDate').value = minDate.toISOString().split('T')[0];
+                document.getElementById('endDate').value = maxDate.toISOString().split('T')[0];
+            }
+        }
+
+        // フィルターの適用
+        function applyFilters() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const weekday = document.getElementById('weekdayFilter').value;
+
+            // 当期データをフィルター
+            filteredCurrentYearData = currentYearSalesData.filter(item => {
+                const dateCondition = (!startDate || item.date >= startDate) && (!endDate || item.date <= endDate);
+                const weekdayCondition = weekday === 'all' || item.weekday === weekday;
+                return dateCondition && weekdayCondition;
+            });
+
+            // 前年データをフィルター（当期データの日付から1年前の期間に対応させる）
+            filteredPreviousYearData = [];
+            if (previousYearSalesData.length > 0) {
+                const currentYearStart = new Date(startDate);
+                const currentYearEnd = new Date(endDate);
+
+                // 前年の対応する日付範囲を計算
+                const prevYearStartDate = new Date(currentYearStart.getFullYear() - 1, currentYearStart.getMonth(), currentYearStart.getDate()).toISOString().split('T')[0];
+                const prevYearEndDate = new Date(currentYearEnd.getFullYear() - 1, currentYearEnd.getMonth(), currentYearEnd.getDate()).toISOString().split('T')[0];
+                
+                filteredPreviousYearData = previousYearSalesData.filter(item => {
+                    const dateCondition = (!prevYearStartDate || item.date >= prevYearStartDate) && (!prevYearEndDate || item.date <= prevYearEndDate);
+                    const weekdayCondition = weekday === 'all' || item.weekday === weekday;
+                    return dateCondition && weekdayCondition;
+                });
+            }
+
+            // ダッシュボードの更新
+            updateDashboard();
+        }
+
+        // ダッシュボードの更新
+        function updateDashboard() {
+            updateSummaryCards();
+            updateServiceSummary();
+            updateCharts();
+            updateDataTable();
+        }
+
+        // YoY比較のヘルパー関数
+        function getYoYComparisonText(currentValue, previousValue, unit = '', isCurrency = false) {
+            if (previousValue === 0 || isNaN(previousValue) || previousValue === undefined || previousValue === null) {
+                return `<span class="text-gray-400 text-xs">(前年データなし/0)</span>`;
+            }
+            const diff = currentValue - previousValue;
+            const percentChange = (diff / previousValue) * 100;
+            const sign = diff >= 0 ? '▲' : '▼';
+            // Apply color based on diff value: black for positive, red for negative
+            const colorClass = diff >= 0 ? 'text-black-force' : 'comparison-negative';
+            const formattedDiff = isCurrency ? `¥${Math.abs(diff).toLocaleString()}` : `${Math.abs(diff).toLocaleString()}${unit}`;
+            return `<span class="${colorClass} font-semibold text-sm">${sign} ${formattedDiff} (${percentChange.toFixed(1)}%)</span>`;
+        }
+
+        // サマリーカードの更新
+        function updateSummaryCards() {
+            const totalSales = filteredCurrentYearData.reduce((sum, item) => sum + item.totalSales, 0);
+            const totalSaunaCount = filteredCurrentYearData.reduce((sum, item) => sum + item.saunaCount, 0);
+            const totalStayingCount = filteredCurrentYearData.reduce((sum, item) => sum + item.stayingCount, 0);
+            const totalCurrentYearVisitors = totalSaunaCount + totalStayingCount;
+            const averagePrice = totalCurrentYearVisitors > 0 ? totalSales / totalCurrentYearVisitors : 0;
+
+            // 前年データ
+            const prevTotalSales = filteredPreviousYearData.reduce((sum, item) => sum + item.totalSales, 0);
+            const prevTotalSaunaCount = filteredPreviousYearData.reduce((sum, item) => sum + item.saunaCount, 0);
+            const prevTotalStayingCount = filteredPreviousYearData.reduce((sum, item) => sum + item.stayingCount, 0);
+            const prevTotalVisitors = prevTotalSaunaCount + prevTotalStayingCount;
+            const prevAveragePrice = prevTotalVisitors > 0 ? prevTotalSales / prevTotalVisitors : 0;
+
+            // 総売上
+            document.getElementById('totalSalesSummary').innerHTML = `
+                当期: <span class="text-white">¥${totalSales.toLocaleString()}</span><br>
+                前年: <span class="text-gray-200">¥${prevTotalSales.toLocaleString()}</span> ${getYoYComparisonText(totalSales, prevTotalSales, '', true)}
+            `;
+            // サウナ利用者数
+            document.getElementById('totalSaunaCountSummary').innerHTML = `
+                当期: <span class="text-white">${totalSaunaCount.toLocaleString()}人</span><br>
+                前年: <span class="text-gray-200">${prevTotalSaunaCount.toLocaleString()}人</span> ${getYoYComparisonText(totalSaunaCount, prevTotalSaunaCount, '人')}
+            `;
+            // 宿泊者数
+            document.getElementById('totalStayingCountSummary').innerHTML = `
+                当期: <span class="text-white">${totalStayingCount.toLocaleString()}人</span><br>
+                前年: <span class="text-gray-200">${prevTotalStayingCount.toLocaleString()}人</span> ${getYoYComparisonText(totalStayingCount, prevTotalStayingCount, '人')}
+            `;
+            // 平均客単価
+            document.getElementById('averagePriceSummary').innerHTML = `
+                当期: <span class="text-white">¥${Math.round(averagePrice).toLocaleString()}</span><br>
+                前年: <span class="text-gray-200">¥${Math.round(prevAveragePrice).toLocaleString()}</span> ${getYoYComparisonText(averagePrice, prevAveragePrice, '', true)}
+            `;
+        }
+
+        // サービス別サマリーの更新
+        function updateServiceSummary() {
+            const totalSales = filteredCurrentYearData.reduce((sum, item) => sum + item.totalSales, 0);
+            const saunaSales = filteredCurrentYearData.reduce((sum, item) => sum + item.saunaSales, 0);
+            const stayingSales = filteredCurrentYearData.reduce((sum, item) => sum + item.stayingSales, 0);
+            const massageSales = filteredCurrentYearData.reduce((sum, item) => sum + item.massageSales, 0);
+            const grillSales = filteredCurrentYearData.reduce((sum, item) => sum + item.grillSales, 0);
+            const retailSales = filteredCurrentYearData.reduce((sum, item) => sum + item.retailSales, 0);
+
+            // 前年データ
+            const prevSaunaSales = filteredPreviousYearData.reduce((sum, item) => sum + item.saunaSales, 0);
+            const prevStayingSales = filteredPreviousYearData.reduce((sum, item) => sum + item.stayingSales, 0);
+            const prevMassageSales = filteredPreviousYearData.reduce((sum, item) => sum + item.massageSales, 0);
+            const prevGrillSales = filteredPreviousYearData.reduce((sum, item) => sum + item.grillSales, 0);
+            const prevRetailSales = filteredPreviousYearData.reduce((sum, item) => sum + item.retailSales, 0);
+
+            // サウナ売上
+            document.getElementById('saunaSalesSummary').innerHTML = `
+                当期: ¥${saunaSales.toLocaleString()}<br>
+                前年: ¥${prevSaunaSales.toLocaleString()} ${getYoYComparisonText(saunaSales, prevSaunaSales, '', true)}
+            `;
+            // 宿泊売上
+            document.getElementById('stayingSalesSummary').innerHTML = `
+                当期: ¥${stayingSales.toLocaleString()}<br>
+                前年: ¥${prevStayingSales.toLocaleString()} ${getYoYComparisonText(stayingSales, prevStayingSales, '', true)}
+            `;
+            // マッサージ売上
+            document.getElementById('massageSalesSummary').innerHTML = `
+                当期: ¥${massageSales.toLocaleString()}<br>
+                前年: ¥${prevMassageSales.toLocaleString()} ${getYoYComparisonText(massageSales, prevMassageSales, '', true)}
+            `;
+            // グリル売上
+            document.getElementById('grillSalesSummary').innerHTML = `
+                当期: ¥${grillSales.toLocaleString()}<br>
+                前年: ¥${prevGrillSales.toLocaleString()} ${getYoYComparisonText(grillSales, prevGrillSales, '', true)}
+            `;
+            // 物販売上
+            document.getElementById('retailSalesSummary').innerHTML = `
+                当期: ¥${retailSales.toLocaleString()}<br>
+                前年: ¥${prevRetailSales.toLocaleString()} ${getYoYComparisonText(retailSales, prevRetailSales, '', true)}
+            `;
+
+            // 割合の計算 (これは引き続き表示)
+            if (totalSales > 0) {
+                document.getElementById('saunaSalesPercent').textContent = `全体の${Math.round(saunaSales / totalSales * 100)}%`;
+                document.getElementById('stayingSalesPercent').textContent = `全体の${Math.round(stayingSales / totalSales * 100)}%`;
+                document.getElementById('massageSalesPercent').textContent = `全体の${Math.round(massageSales / totalSales * 100)}%`;
+                document.getElementById('grillSalesPercent').textContent = `全体の${Math.round(grillSales / totalSales * 100)}%`;
+                document.getElementById('retailSalesPercent').textContent = `全体の${Math.round(retailSales / totalSales * 100)}%`;
+            } else {
+                document.getElementById('saunaSalesPercent').textContent = `全体の0%`;
+                document.getElementById('stayingSalesPercent').textContent = `全体の0%`;
+                document.getElementById('massageSalesPercent').textContent = `全体の0%`;
+                document.getElementById('grillSalesPercent').textContent = `全体の0%`;
+                document.getElementById('retailSalesPercent').textContent = `全体の0%`;
+            }
+        }
+
+        // チャートの更新
+        function updateCharts() {
+            // 既存のチャートを破棄
+            Object.values(charts).forEach(chart => {
+                if (chart) chart.destroy();
+            });
+            charts = {};
+
+            // 日別売上推移チャート
+            createDailySalesChart();
+            // サービス別売上構成チャート
+            createServiceSalesChart();
+            // 人数と売上の相関チャート
+            createCorrelationChart();
+            // 曜日別サウナ利用分布チャート
+            createWeekdaySaunaChart();
+            // 曜日別宿泊利用分布チャート
+            createWeekdayStayingChart();
+        }
+
+        // 日付を「月/日」形式に変換するヘルパー関数
+        function formatDateToMonthDay(dateString) {
+            const date = new Date(dateString);
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+
+        // 日別売上推移チャートの作成
+        function createDailySalesChart() {
+            const sortedCurrentData = [...filteredCurrentYearData].sort((a, b) => a.date.localeCompare(b.date));
+            const sortedPreviousData = [...filteredPreviousYearData].sort((a, b) => a.date.localeCompare(b.date));
+
+            const labels = sortedCurrentData.map(item => formatDateToMonthDay(item.date));
+            const totalSalesCurrent = sortedCurrentData.map(item => item.totalSales);
+            const saunaSalesCurrent = sortedCurrentData.map(item => item.saunaSales);
+            const stayingSalesCurrent = sortedCurrentData.map(item => item.stayingSales);
+
+            const datasets = [
+                {
+                    label: '総売上 (当期)',
+                    data: totalSalesCurrent,
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)', // Blue
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 3
+                },
+                {
+                    label: 'サウナ売上 (当期)',
+                    data: saunaSalesCurrent,
+                    backgroundColor: 'rgba(16, 185, 129, 0.2)', // Green
+                    borderColor: 'rgba(16, 185, 129, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 3
+                },
+                {
+                    label: '宿泊売上 (当期)',
+                    data: stayingSalesCurrent,
+                    backgroundColor: 'rgba(139, 92, 246, 0.2)', // Purple
+                    borderColor: 'rgba(139, 92, 246, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 3
+                }
+            ];
+
+            if (sortedPreviousData.length > 0) {
+                // 当期データと同じ日付ラベルに合わせて前年データをマッピング
+                const totalSalesPrevious = labels.map(label => {
+                    const currentYear = new Date().getFullYear(); // 当期の日付の年を取得
+                    const monthDay = label.split('/');
+                    const targetMonth = parseInt(monthDay[0]) - 1;
+                    const targetDay = parseInt(monthDay[1]);
+                    
+                    const prevYearDate = new Date(currentYear - 1, targetMonth, targetDay).toISOString().split('T')[0];
+                    const prevItem = sortedPreviousData.find(item => item.date === prevYearDate);
+                    return prevItem ? prevItem.totalSales : NaN; // データがない場合はNaN
+                });
+
+                const saunaSalesPrevious = labels.map(label => {
+                    const currentYear = new Date().getFullYear();
+                    const monthDay = label.split('/');
+                    const targetMonth = parseInt(monthDay[0]) - 1;
+                    const targetDay = parseInt(monthDay[1]);
+                    
+                    const prevYearDate = new Date(currentYear - 1, targetMonth, targetDay).toISOString().split('T')[0];
+                    const prevItem = sortedPreviousData.find(item => item.date === prevYearDate);
+                    return prevItem ? prevItem.saunaSales : NaN;
+                });
+
+                const stayingSalesPrevious = labels.map(label => {
+                    const currentYear = new Date().getFullYear();
+                    const monthDay = label.split('/');
+                    const targetMonth = parseInt(monthDay[0]) - 1;
+                    const targetDay = parseInt(monthDay[1]);
+                    
+                    const prevYearDate = new Date(currentYear - 1, targetMonth, targetDay).toISOString().split('T')[0];
+                    const prevItem = sortedPreviousData.find(item => item.date === prevYearDate);
+                    return prevItem ? prevItem.stayingSales : NaN;
+                });
+
+
+                datasets.push({
+                    label: '総売上 (前年)',
+                    data: totalSalesPrevious,
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)', // Red (lighter)
+                    borderColor: 'rgba(239, 68, 68, 0.7)',
+                    borderWidth: 2,
+                    borderDash: [5, 5], // 破線
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2
+                });
+                datasets.push({
+                    label: 'サウナ売上 (前年)',
+                    data: saunaSalesPrevious,
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)', // Lighter Green
+                    borderColor: 'rgba(16, 185, 129, 0.7)',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2
+                });
+                datasets.push({
+                    label: '宿泊売上 (前年)',
+                    data: stayingSalesPrevious,
+                    backgroundColor: 'rgba(139, 92, 246, 0.1)', // Lighter Purple
+                    borderColor: 'rgba(139, 92, 246, 0.7)',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2
+                });
+            }
+
+            const ctx = document.getElementById('dailySalesChart').getContext('2d');
+            charts.dailySales = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (isNaN(context.raw)) {
+                                        return `${context.dataset.label}: データなし`;
+                                    }
+                                    return `${context.dataset.label}: ¥${context.raw.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // サービス別売上構成チャートの作成
+        function createServiceSalesChart() {
+            const saunaSales = filteredCurrentYearData.reduce((sum, item) => sum + item.saunaSales, 0);
+            const stayingSales = filteredCurrentYearData.reduce((sum, item) => sum + item.stayingSales, 0);
+            const massageSales = filteredCurrentYearData.reduce((sum, item) => sum + item.massageSales, 0);
+            const grillSales = filteredCurrentYearData.reduce((sum, item) => sum + item.grillSales, 0);
+            const retailSales = filteredCurrentYearData.reduce((sum, item) => sum + item.retailSales, 0);
+
+            const ctx = document.getElementById('serviceSalesChart').getContext('2d');
+            charts.serviceSales = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['サウナ', '宿泊', 'マッサージ', 'グリル', '物販'],
+                    datasets: [{
+                        data: [saunaSales, stayingSales, massageSales, grillSales, retailSales],
+                        backgroundColor: [
+                            'rgba(59, 130, 246, 0.8)', // Blue
+                            'rgba(139, 92, 246, 0.8)', // Indigo
+                            'rgba(236, 72, 153, 0.8)', // Pink (for massage)
+                            'rgba(16, 185, 129, 0.8)', // Green
+                            'rgba(245, 158, 11, 0.8)'  // Amber
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.raw;
+                                    const total = context.dataset.data.reduce((acc, current) => acc + current, 0);
+                                    const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                    return `${label}: ¥${value.toLocaleString()} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 人数と売上の相関チャートの作成
+        function createCorrelationChart() {
+            const dataPoints = filteredCurrentYearData.map(item => ({
+                x: item.saunaCount + item.stayingCount, // 総人数
+                y: item.totalSales
+            }));
+
+            const ctx = document.getElementById('correlationChart').getContext('2d');
+            charts.correlation = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: '人数 vs. 売上',
+                        data: dataPoints,
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `人数: ${context.raw.x.toLocaleString()}人, 売上: ¥${context.raw.y.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: '総人数'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString() + '人';
+                                }
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '総売上'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 曜日別サウナ利用分布チャート
+        function createWeekdaySaunaChart() {
+            // 当期データの集計
+            const currentWeekdaySaunaSummary = {};
+            filteredCurrentYearData.forEach(item => {
+                const weekday = item.weekday;
+                if (!weekday) return;
+                if (!currentWeekdaySaunaSummary[weekday]) {
+                    currentWeekdaySaunaSummary[weekday] = { saunaCount: 0, saunaSales: 0, count: 0 };
+                }
+                currentWeekdaySaunaSummary[weekday].saunaCount += item.saunaCount;
+                currentWeekdaySaunaSummary[weekday].saunaSales += item.saunaSales;
+                currentWeekdaySaunaSummary[weekday].count++;
+            });
+
+            // 前年データの集計
+            const previousWeekdaySaunaSummary = {};
+            if (filteredPreviousYearData.length > 0) {
+                filteredPreviousYearData.forEach(item => {
+                    const weekday = item.weekday;
+                    if (!weekday) return;
+                    if (!previousWeekdaySaunaSummary[weekday]) {
+                        previousWeekdaySaunaSummary[weekday] = { saunaCount: 0, saunaSales: 0, count: 0 };
+                    }
+                    previousWeekdaySaunaSummary[weekday].saunaCount += item.saunaCount;
+                    previousWeekdaySaunaSummary[weekday].saunaSales += item.saunaSales;
+                    previousWeekdaySaunaSummary[weekday].count++;
+                });
+            }
+
+            // 曜日の順序でソート
+            const labels = Object.keys(weekdayOrder).filter(day => 
+                Object.keys(currentWeekdaySaunaSummary).includes(day) || Object.keys(previousWeekdaySaunaSummary).includes(day)
+            ).sort((a, b) => weekdayOrder[a] - weekdayOrder[b]);
+
+            const currentAvgSaunaCount = labels.map(day => 
+                currentWeekdaySaunaSummary[day] && currentWeekdaySaunaSummary[day].count > 0 ? Math.round(currentWeekdaySaunaSummary[day].saunaCount / currentWeekdaySaunaSummary[day].count) : 0
+            );
+            const currentAvgSaunaSales = labels.map(day => 
+                currentWeekdaySaunaSummary[day] && currentWeekdaySaunaSummary[day].count > 0 ? Math.round(currentWeekdaySaunaSummary[day].saunaSales / currentWeekdaySaunaSummary[day].count) : 0
+            );
+
+            const previousAvgSaunaCount = labels.map(day => 
+                previousWeekdaySaunaSummary[day] && previousWeekdaySaunaSummary[day].count > 0 ? Math.round(previousWeekdaySaunaSummary[day].saunaCount / previousWeekdaySaunaSummary[day].count) : NaN // データがない場合はNaN
+            );
+            const previousAvgSaunaSales = labels.map(day => 
+                previousWeekdaySaunaSummary[day] && previousWeekdaySaunaSummary[day].count > 0 ? Math.round(previousWeekdaySaunaSummary[day].saunaSales / previousWeekdaySaunaSummary[day].count) : NaN // データがない場合はNaN
+            );
+
+            const datasets = [
+                {
+                    label: '平均サウナ利用者数 (当期)',
+                    data: currentAvgSaunaCount,
+                    backgroundColor: 'rgba(59, 130, 246, 0.6)', // Blue
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 1,
+                    yAxisID: 'y-count'
+                },
+                {
+                    label: '平均サウナ売上 (当期)',
+                    data: currentAvgSaunaSales,
+                    backgroundColor: 'rgba(16, 185, 129, 0.6)', // Green
+                    borderColor: 'rgba(16, 185, 129, 1)',
+                    borderWidth: 1,
+                    type: 'line',
+                    yAxisID: 'y-sales',
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 3
+                }
+            ];
+
+            if (filteredPreviousYearData.length > 0) {
+                datasets.push({
+                    label: '平均サウナ利用者数 (前年)',
+                    data: previousAvgSaunaCount,
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)', // Lighter Blue
+                    borderColor: 'rgba(59, 130, 246, 0.7)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    yAxisID: 'y-count'
+                });
+                datasets.push({
+                    label: '平均サウナ売上 (前年)',
+                    data: previousAvgSaunaSales,
+                    backgroundColor: 'rgba(16, 185, 129, 0.2)', // Lighter Green
+                    borderColor: 'rgba(16, 185, 129, 0.7)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    type: 'line',
+                    yAxisID: 'y-sales',
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2
+                });
+            }
+
+            const ctx = document.getElementById('weekdaySaunaChart').getContext('2d');
+            charts.weekdaySauna = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (isNaN(context.raw)) {
+                                        return `${context.dataset.label}: データなし`;
+                                    }
+                                    if (context.dataset.label.includes('売上')) {
+                                        return `${context.dataset.label}: ¥${context.raw.toLocaleString()}`;
+                                    } else {
+                                        return `${context.dataset.label}: ${context.raw.toLocaleString()}人`;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        'y-count': {
+                            beginAtZero: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '人数'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString() + '人';
+                                }
+                            }
+                        },
+                        'y-sales': {
+                            beginAtZero: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '売上 (円)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 曜日別宿泊利用分布チャートの作成
+        function createWeekdayStayingChart() {
+            // 当期データの集計
+            const currentWeekdayStayingSummary = {};
+            filteredCurrentYearData.forEach(item => {
+                const weekday = item.weekday;
+                if (!weekday) return;
+                if (!currentWeekdayStayingSummary[weekday]) {
+                    currentWeekdayStayingSummary[weekday] = { stayingCount: 0, stayingSales: 0, count: 0 };
+                }
+                currentWeekdayStayingSummary[weekday].stayingCount += item.stayingCount;
+                currentWeekdayStayingSummary[weekday].stayingSales += item.stayingSales;
+                currentWeekdayStayingSummary[weekday].count++;
+            });
+
+            // 前年データの集計
+            const previousWeekdayStayingSummary = {};
+            if (filteredPreviousYearData.length > 0) {
+                filteredPreviousYearData.forEach(item => {
+                    const weekday = item.weekday;
+                    if (!weekday) return;
+                    if (!previousWeekdayStayingSummary[weekday]) {
+                        previousWeekdayStayingSummary[weekday] = { stayingCount: 0, stayingSales: 0, count: 0 };
+                    }
+                    previousWeekdayStayingSummary[weekday].stayingCount += item.stayingCount;
+                    previousWeekdayStayingSummary[weekday].stayingSales += item.stayingSales;
+                    previousWeekdayStayingSummary[weekday].count++;
+                });
+            }
+
+            // 曜日の順序でソート
+            const labels = Object.keys(weekdayOrder).filter(day => 
+                Object.keys(currentWeekdayStayingSummary).includes(day) || Object.keys(previousWeekdayStayingSummary).includes(day)
+            ).sort((a, b) => weekdayOrder[a] - weekdayOrder[b]);
+
+            const currentAvgStayingCount = labels.map(day => 
+                currentWeekdayStayingSummary[day] && currentWeekdayStayingSummary[day].count > 0 ? Math.round(currentWeekdayStayingSummary[day].stayingCount / currentWeekdayStayingSummary[day].count) : 0
+            );
+            const currentAvgStayingSales = labels.map(day => 
+                currentWeekdayStayingSummary[day] && currentWeekdayStayingSummary[day].count > 0 ? Math.round(currentWeekdayStayingSummary[day].stayingSales / currentWeekdayStayingSummary[day].count) : 0
+            );
+
+            const previousAvgStayingCount = labels.map(day => 
+                previousWeekdayStayingSummary[day] && previousWeekdayStayingSummary[day].count > 0 ? Math.round(previousWeekdayStayingSummary[day].stayingCount / previousWeekdayStayingSummary[day].count) : NaN // データがない場合はNaN
+            );
+            const previousAvgStayingSales = labels.map(day => 
+                previousWeekdayStayingSummary[day] && previousWeekdayStayingSummary[day].count > 0 ? Math.round(previousWeekdayStayingSummary[day].stayingSales / previousWeekdayStayingSummary[day].count) : NaN // データがない場合はNaN
+            );
+
+            const datasets = [
+                {
+                    label: '平均宿泊者数 (当期)',
+                    data: currentAvgStayingCount,
+                    backgroundColor: 'rgba(139, 92, 246, 0.6)', // Purple
+                    borderColor: 'rgba(139, 92, 246, 1)',
+                    borderWidth: 1,
+                    yAxisID: 'y-count'
+                },
+                {
+                    label: '平均宿泊売上 (当期)',
+                    data: currentAvgStayingSales,
+                    backgroundColor: 'rgba(236, 72, 153, 0.6)', // Pink
+                    borderColor: 'rgba(236, 72, 153, 1)',
+                    borderWidth: 1,
+                    type: 'line',
+                    yAxisID: 'y-sales',
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 3
+                }
+            ];
+
+            if (filteredPreviousYearData.length > 0) {
+                datasets.push({
+                    label: '平均宿泊者数 (前年)',
+                    data: previousAvgStayingCount,
+                    backgroundColor: 'rgba(139, 92, 246, 0.2)', // Lighter Purple
+                    borderColor: 'rgba(139, 92, 246, 0.7)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    yAxisID: 'y-count'
+                });
+                datasets.push({
+                    label: '平均宿泊売上 (前年)',
+                    data: previousAvgStayingSales,
+                    backgroundColor: 'rgba(236, 72, 153, 0.2)', // Lighter Pink
+                    borderColor: 'rgba(236, 72, 153, 0.7)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    type: 'line',
+                    yAxisID: 'y-sales',
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2
+                });
+            }
+
+            const ctx = document.getElementById('weekdayStayingChart').getContext('2d');
+            charts.weekdayStaying = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (isNaN(context.raw)) {
+                                        return `${context.dataset.label}: データなし`;
+                                    }
+                                    if (context.dataset.label.includes('売上')) {
+                                        return `${context.dataset.label}: ¥${context.raw.toLocaleString()}`;
+                                    } else {
+                                        return `${context.dataset.label}: ${context.raw.toLocaleString()}人`;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        'y-count': {
+                            beginAtZero: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '人数'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString() + '人';
+                                }
+                            }
+                        },
+                        'y-sales': {
+                            beginAtZero: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '売上 (円)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '¥' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // データテーブルの更新
+        function updateDataTable() {
+            const tableBody = document.getElementById('dataTableBody');
+            tableBody.innerHTML = ''; // 既存の行をクリア
+
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = startIndex + rowsPerPage;
+            const paginatedData = filteredCurrentYearData.slice(startIndex, endIndex);
+
+            paginatedData.forEach(currentItem => {
+                const row = tableBody.insertRow();
+                // 曜日によって背景色を変更
+                if (currentItem.weekday === '日' || currentItem.weekday === '土') {
+                    row.classList.add(`weekday-${weekdayOrder[currentItem.weekday]}`);
+                }
+
+                // ヘルパー関数で前年データを取得
+                const getPreviousYearData = (date, dataArray) => {
+                    if (!dataArray || dataArray.length === 0) return null;
+                    const currentYearDate = new Date(date);
+                    const prevYearDate = new Date(currentYearDate.getFullYear() - 1, currentYearDate.getMonth(), currentYearDate.getDate()).toISOString().split('T')[0];
+                    return dataArray.find(item => item.date === prevYearDate);
+                };
+
+                const prevItem = getPreviousYearData(currentItem.date, filteredPreviousYearData);
+
+                // YoYパーセンテージを計算するヘルパー関数
+                const calculateYoY = (currentValue, previousValue) => {
+                    if (previousValue === 0 || isNaN(previousValue) || previousValue === undefined || previousValue === null) {
+                        return 'N/A';
+                    }
+                    return (((currentValue - previousValue) / previousValue) * 100).toFixed(1);
+                };
+
+                row.insertCell().textContent = currentItem.date;
+                row.insertCell().textContent = currentItem.weekday;
+                
+                // 総売上
+                row.insertCell().textContent = currentItem.totalSales.toLocaleString();
+                row.insertCell().textContent = prevItem ? prevItem.totalSales.toLocaleString() : 'N/A';
+                row.insertCell().textContent = calculateYoY(currentItem.totalSales, prevItem ? prevItem.totalSales : 0) + '%';
+
+                // サウナ売上
+                row.insertCell().textContent = currentItem.saunaSales.toLocaleString();
+                row.insertCell().textContent = calculateYoY(currentItem.saunaSales, prevItem ? prevItem.saunaSales : 0) + '%';
+                row.insertCell().textContent = currentItem.saunaCount.toLocaleString();
+
+                // 宿泊売上
+                row.insertCell().textContent = currentItem.stayingSales.toLocaleString();
+                row.insertCell().textContent = calculateYoY(currentItem.stayingSales, prevItem ? prevItem.stayingSales : 0) + '%';
+                row.insertCell().textContent = currentItem.stayingCount.toLocaleString();
+
+                // マッサージ
+                row.insertCell().textContent = currentItem.massageSales.toLocaleString();
+                row.insertCell().textContent = calculateYoY(currentItem.massageSales, prevItem ? prevItem.massageSales : 0) + '%';
+                
+                // グリル
+                row.insertCell().textContent = currentItem.grillSales.toLocaleString();
+                row.insertCell().textContent = calculateYoY(currentItem.grillSales, prevItem ? prevItem.grillSales : 0) + '%';
+
+                // 物販
+                row.insertCell().textContent = currentItem.retailSales.toLocaleString();
+                row.insertCell().textContent = calculateYoY(currentItem.retailSales, prevItem ? prevItem.retailSales : 0) + '%';
+            });
+
+            // ページネーション情報の更新
+            const tableInfo = document.getElementById('tableInfo');
+            const totalRows = filteredCurrentYearData.length;
+            const startRow = totalRows > 0 ? startIndex + 1 : 0;
+            const endRow = Math.min(startIndex + rowsPerPage, totalRows);
+            tableInfo.textContent = `${totalRows}件中 ${startRow}-${endRow}件を表示`;
+
+            document.getElementById('prevPageBtn').disabled = currentPage === 1;
+            document.getElementById('nextPageBtn').disabled = endIndex >= totalRows;
+        }
+
+        // ページ変更
+        function changePage(direction) {
+            currentPage += direction;
+            updateDataTable();
+        }
+
+        // CSVエクスポート
+        function exportToCsv() {
+            if (filteredCurrentYearData.length === 0) {
+                showMessageBox('エクスポートするデータがありません。');
+                return;
+            }
+
+            const headers = [
+                '日付', '曜日', '売上日計 (当期)', '売上日計 (前年)', '総売上 前年比 (%)',
+                'サウナ売上 (当期)', 'サウナ売上 前年比 (%)', 'サウナ人数 (当期)',
+                '宿泊売上 (当期)', '宿泊売上 前年比 (%)', '宿泊人数 (当期)',
+                'マッサージ (当期)', 'マッサージ 前年比 (%)',
+                'グリル (当期)', 'グリル 前年比 (%)',
+                '物販 (当期)', '物販 前年比 (%)'
+            ];
+
+            const csvRows = [];
+            csvRows.push(headers.join(','));
+
+            filteredCurrentYearData.forEach(currentItem => {
+                const getPreviousYearData = (date, dataArray) => {
+                    if (!dataArray || dataArray.length === 0) return null;
+                    const currentYearDate = new Date(date);
+                    const prevYearDate = new Date(currentYearDate.getFullYear() - 1, currentYearDate.getMonth(), currentYearDate.getDate()).toISOString().split('T')[0];
+                    return dataArray.find(item => item.date === prevYearDate);
+                };
+
+                const calculateYoY = (currentValue, previousValue) => {
+                    if (previousValue === 0 || isNaN(previousValue) || previousValue === undefined || previousValue === null) {
+                        return 'N/A';
+                    }
+                    return (((currentValue - previousValue) / previousValue) * 100).toFixed(1);
+                };
+
+                const prevItem = getPreviousYearData(currentItem.date, filteredPreviousYearData);
+
+                const row = [
+                    `"${currentItem.date}"`,
+                    `"${currentItem.weekday}"`,
+                    currentItem.totalSales,
+                    prevItem ? prevItem.totalSales : 'N/A',
+                    calculateYoY(currentItem.totalSales, prevItem ? prevItem.totalSales : 0),
+                    currentItem.saunaSales,
+                    calculateYoY(currentItem.saunaSales, prevItem ? prevItem.saunaSales : 0),
+                    currentItem.saunaCount,
+                    currentItem.stayingSales,
+                    calculateYoY(currentItem.stayingSales, prevItem ? prevItem.stayingSales : 0),
+                    currentItem.stayingCount,
+                    currentItem.massageSales,
+                    calculateYoY(currentItem.massageSales, prevItem ? prevItem.massageSales : 0),
+                    currentItem.grillSales,
+                    calculateYoY(currentItem.grillSales, prevItem ? prevItem.grillSales : 0),
+                    currentItem.retailSales,
+                    calculateYoY(currentItem.retailSales, prevItem ? prevItem.retailSales : 0)
+                ].map(value => {
+                    // CSVでカンマが含まれる数値や文字列を正しくエスケープ
+                    if (typeof value === 'string' && value.includes(',')) {
+                        return `"${value}"`;
+                    }
+                    return value;
+                }).join(',');
+                csvRows.push(row);
+            });
+
+            const csvString = csvRows.join('\n');
+            const blob = new Blob(["\ufeff", csvString], { type: 'text/csv;charset=utf-8;' }); // UTF-8 BOM付き
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = '施設売上分析データ_当期・前年比較.csv';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        }
+
+        // 共有モーダルの表示
+        function showShareModal() {
+            const shareModal = document.getElementById('shareModal');
+            shareModal.style.display = 'flex'; // Flexboxを使って中央揃え
+
+            // 現在のデータとフィルター設定をURLに含める
+            const compressedCurrentData = LZString.compressToEncodedURIComponent(JSON.stringify(currentYearSalesData));
+            const compressedPreviousData = LZString.compressToEncodedURIComponent(JSON.stringify(previousYearSalesData));
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const weekday = document.getElementById('weekdayFilter').value;
+
+            const shareUrl = new URL(window.location.origin + window.location.pathname);
+            shareUrl.searchParams.set('view', 'true');
+            shareUrl.searchParams.set('current_data', compressedCurrentData);
+            if (previousYearSalesData.length > 0) {
+                shareUrl.searchParams.set('previous_data', compressedPreviousData);
+            }
+            if (startDate) shareUrl.searchParams.set('start', startDate);
+            if (endDate) shareUrl.searchParams.set('end', endDate);
+            if (weekday && weekday !== 'all') shareUrl.searchParams.set('weekday', weekday);
+
+            document.getElementById('shareUrl').value = shareUrl.toString();
+        }
+
+        // 共有モーダルの非表示
+        function hideShareModal() {
+            const shareModal = document.getElementById('shareModal');
+            shareModal.style.display = 'none';
+        }
+
+        // 共有URLのコピー
+        function copyShareUrl() {
+            const shareUrl = document.getElementById('shareUrl');
+            shareUrl.select();
+            document.execCommand('copy');
+            
+            const copyBtn = document.getElementById('copyUrlBtn');
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = 'コピーしました！';
+            setTimeout(() => {
+                copyBtn.textContent = originalText;
+            }, 2000);
+        }
+    </script>
 </body>
 </html>
