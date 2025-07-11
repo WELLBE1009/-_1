@@ -3,11 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>施設売上分析ダッシュボード (前年比較版)</title>
+    <title>施設売上分析ダッシュボード (Firebase 統合版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
+
+    <!-- Firebase SDK のインポート -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // グローバル変数としてFirebaseサービスインスタンスを定義
+        window.firebaseApp = null;
+        window.db = null;
+        window.auth = null;
+        window.userId = null;
+        window.isFirebaseReady = false; // Firebase初期化完了フラグ
+
+        // Firebaseの初期化関数
+        async function initializeFirebase() {
+            try {
+                // Canvas環境から提供されるグローバル変数を使用
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                if (!firebaseConfig) {
+                    console.error("Firebase config is not provided. Please ensure __firebase_config is set.");
+                    document.getElementById('fileStatusText').textContent = "エラー: Firebase設定が不足しています。";
+                    return;
+                }
+
+                window.firebaseApp = initializeApp(firebaseConfig);
+                window.db = getFirestore(window.firebaseApp);
+                window.auth = getAuth(window.firebaseApp);
+
+                // 認証状態の監視
+                onAuthStateChanged(window.auth, async (user) => {
+                    if (user) {
+                        window.userId = user.uid;
+                        console.log("Firebase authenticated. User ID:", window.userId);
+                        window.isFirebaseReady = true;
+                        // 認証後、URLパラメータを再チェックしてデータ読み込みを試みる
+                        checkUrlParams();
+                    } else {
+                        // 認証トークンがある場合はカスタム認証、ない場合は匿名認証
+                        if (initialAuthToken) {
+                            try {
+                                await signInWithCustomToken(window.auth, initialAuthToken);
+                                console.log("Signed in with custom token.");
+                            } catch (error) {
+                                console.error("Error signing in with custom token:", error);
+                                // カスタムトークンで失敗した場合、匿名認証を試みる
+                                try {
+                                    await signInAnonymously(window.auth);
+                                    console.log("Signed in anonymously after custom token failure.");
+                                } catch (anonError) {
+                                    console.error("Error signing in anonymously:", anonError);
+                                    document.getElementById('fileStatusText').textContent = `エラー: 認証に失敗しました。${anonError.message}`;
+                                }
+                            }
+                        } else {
+                            try {
+                                await signInAnonymously(window.auth);
+                                console.log("Signed in anonymously.");
+                            } catch (error) {
+                                console.error("Error signing in anonymously:", error);
+                                document.getElementById('fileStatusText').textContent = `エラー: 認証に失敗しました。${error.message}`;
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                document.getElementById('fileStatusText').textContent = `エラー: Firebase初期化に失敗しました。${error.message}`;
+            }
+        }
+
+        // DOMContentLoaded後にFirebaseを初期化
+        document.addEventListener('DOMContentLoaded', initializeFirebase);
+    </script>
+
     <style>
         body {
             font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
@@ -54,7 +132,7 @@
         textarea {
             resize: none;
         }
-        #shareModal, #messageBox {
+        #shareModal, #messageBox, #loadingOverlay {
             display: none;
             position: fixed;
             top: 0;
@@ -115,13 +193,26 @@
             border-radius: 0.25rem;
             margin-bottom: 1rem;
         }
+        /* Loading spinner styles */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
     <div class="min-h-screen p-4 md:p-8">
         <header class="mb-8 flex justify-between items-center">
             <div>
-                <h1 class="text-3xl font-bold text-gray-800">施設売上分析ダッシュボード (前年比較版)</h1>
+                <h1 class="text-3xl font-bold text-gray-800">施設売上分析ダッシュボード (Firebase 統合版)</h1>
                 <p class="text-gray-600 mt-2">日別データから自動生成されたインタラクティブな分析ツール</p>
             </div>
             <div id="dataInputSection">
@@ -369,8 +460,8 @@
                 <button id="copyUrlBtn" class="btn-primary px-4 py-2 rounded-r-md">コピー</button>
             </div>
             <div class="mt-4 text-sm text-gray-600">
-                <p>※ 共有URLには入力データが含まれています。共有先でデータの入力は不要です。</p>
-                <p>※ 長期間の保存には適していません。データ量が多い場合はURLが長くなります。</p>
+                <p>※ 共有URLには入力データは直接含まれていません。代わりに、Firebaseに保存されたデータへの短いリンクが含まれます。</p>
+                <p>※ データ量が多い場合でもURLが長くなる問題が改善されます。</p>
             </div>
         </div>
     </div>
@@ -393,7 +484,14 @@
         </div>
     </div>
 
-    <script>
+    <!-- ローディングオーバーレイ -->
+    <div id="loadingOverlay">
+        <div class="loader"></div>
+        <p class="text-white text-lg mt-4" id="loadingText">データを処理中...</p>
+    </div>
+
+    <script type="module">
+        // Firebase関連のimportはHTMLのhead部分に移動しました。
         // グローバル変数
         let currentYearSalesData = [];
         let previousYearSalesData = [];
@@ -403,6 +501,7 @@
         const rowsPerPage = 10;
         let charts = {};
         let isViewMode = false;
+        let currentShareDocId = null; // 現在表示中の共有データのFirestoreドキュメントID
 
         // 曜日の順序マッピング（ソート用）
         const weekdayOrder = {
@@ -424,14 +523,24 @@
             document.getElementById('exportCsvBtn').addEventListener('click', exportToCsv);
             document.getElementById('prevPageBtn').addEventListener('click', () => changePage(-1));
             document.getElementById('nextPageBtn').addEventListener('click', () => changePage(1));
-            document.getElementById('shareBtn').addEventListener('click', showShareModal);
+            document.getElementById('shareBtn').addEventListener('click', handleShareButtonClick); // 共有ボタンのハンドラを変更
             document.getElementById('closeModalBtn').addEventListener('click', hideShareModal);
             document.getElementById('copyUrlBtn').addEventListener('click', copyShareUrl);
             document.getElementById('closeMessageBoxBtn').addEventListener('click', hideMessageBox); // カスタムメッセージボックスの閉じるボタン
 
-            // URLパラメータをチェック
-            checkUrlParams();
+            // Firebaseの初期化はhead部分のscript type="module"で行われます。
+            // Firebaseの初期化が完了した後にURLパラメータをチェックするように、initializeFirebase関数内でcheckUrlParamsを呼び出しています。
         });
+
+        // ローディングオーバーレイの表示/非表示
+        function showLoading(message = "処理中...") {
+            document.getElementById('loadingText').textContent = message;
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
 
         // カスタムメッセージボックスの表示
         function showMessageBox(message) {
@@ -445,62 +554,125 @@
         }
 
         // URLパラメータのチェック
-        function checkUrlParams() {
+        async function checkUrlParams() {
+            // Firebaseがまだ準備できていない場合は、準備完了後に再度呼び出す
+            if (!window.isFirebaseReady) {
+                console.log("Firebase not ready, deferring URL param check.");
+                return;
+            }
+
             const urlParams = new URLSearchParams(window.location.search);
             const viewMode = urlParams.get('view');
+            const shareDocId = urlParams.get('id'); // FirebaseドキュメントID
             const startDate = urlParams.get('start');
             const endDate = urlParams.get('end');
             const weekday = urlParams.get('weekday');
-            const compressedCurrentData = urlParams.get('current_data');
-            const compressedPreviousData = urlParams.get('previous_data');
 
-            if (viewMode === 'true') {
+            if (viewMode === 'true' && shareDocId) {
                 isViewMode = true;
-                // 入力セクションを非表示
+                currentShareDocId = shareDocId; // 共有されているドキュメントIDを保存
                 document.getElementById('inputSection').style.display = 'none';
-
-                // フィルター設定を復元
-                if (startDate) document.getElementById('startDate').value = startDate;
-                if (endDate) document.getElementById('endDate').value = endDate;
-                if (weekday) document.getElementById('weekdayFilter').value = weekday;
-
-                // 共有ボタンのテキストを変更
-                document.getElementById('shareBtn').textContent = 'データを編集';
+                document.getElementById('shareBtn').textContent = 'データを編集'; // 共有ボタンのテキストを変更
+                document.getElementById('shareBtn').removeEventListener('click', handleShareButtonClick);
                 document.getElementById('shareBtn').addEventListener('click', function() {
+                    // 編集モードに戻る（URLパラメータをクリア）
                     window.location.href = window.location.pathname;
                 });
 
-                // 圧縮データがある場合は復元
-                if (compressedCurrentData) {
-                    try {
-                        const decompressedCurrentData = LZString.decompressFromEncodedURIComponent(compressedCurrentData);
-                        if (decompressedCurrentData) {
-                            currentYearSalesData = JSON.parse(decompressedCurrentData);
-                            currentYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
+                showLoading("共有データを読み込み中...");
+                try {
+                    const docRef = window.doc(window.db, `artifacts/${__app_id}/public/data/sales_data`, shareDocId);
+                    const docSnap = await window.getDoc(docRef);
+
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        currentYearSalesData = data.currentYearData || [];
+                        previousYearSalesData = data.previousYearData || [];
+
+                        // フィルター設定を復元
+                        if (startDate) document.getElementById('startDate').value = startDate;
+                        if (endDate) document.getElementById('endDate').value = endDate;
+                        if (weekday) document.getElementById('weekdayFilter').value = weekday;
+
+                        if (currentYearSalesData.length > 0) {
+                            setupDateRange(); // 読み込んだデータに基づいて日付範囲を再設定
+                            applyFilters();
+                            document.getElementById('dashboardContent').classList.remove('hidden');
+                            document.getElementById('fileStatusText').textContent = "共有データを読み込みました。";
+                        } else {
+                            showMessageBox("共有データが見つかりませんでした。またはデータが空です。");
+                            document.getElementById('fileStatusText').textContent = "共有データなし。";
                         }
-                    } catch (e) {
-                        console.error('当期データの復元に失敗しました:', e);
-                        showMessageBox('共有データの読み込みに失敗しました。URLが正しいか確認してください。');
+                    } else {
+                        showMessageBox("指定された共有データが見つかりませんでした。URLが正しいか確認してください。");
+                        document.getElementById('fileStatusText').textContent = "共有データなし。";
                     }
+                } catch (e) {
+                    console.error('共有データの読み込みに失敗しました:', e);
+                    showMessageBox(`共有データの読み込みに失敗しました: ${e.message}`);
+                    document.getElementById('fileStatusText').textContent = `エラー: ${e.message}`;
+                } finally {
+                    hideLoading();
                 }
-                if (compressedPreviousData) {
-                    try {
-                        const decompressedPreviousData = LZString.decompressFromEncodedURIComponent(compressedPreviousData);
-                        if (decompressedPreviousData) {
-                            previousYearSalesData = JSON.parse(decompressedPreviousData);
-                            previousYearSalesData.sort((a, b) => a.date.localeCompare(b.date));
-                        }
-                    } catch (e) {
-                        console.error('前年データの復元に失敗しました:', e);
-                        showMessageBox('共有データの読み込みに失敗しました。URLが正しいか確認してください。');
-                    }
+            } else {
+                // 通常の入力モード
+                document.getElementById('inputSection').style.display = 'block';
+                document.getElementById('dashboardContent').classList.add('hidden');
+                document.getElementById('shareBtn').textContent = '分析結果を共有';
+                document.getElementById('shareBtn').removeEventListener('click', function() {
+                    window.location.href = window.location.pathname;
+                }); // 以前のイベントリスナーを削除
+                document.getElementById('shareBtn').addEventListener('click', handleShareButtonClick); // 新しいハンドラを再設定
+            }
+        }
+
+        // 共有ボタンのクリックハンドラ
+        async function handleShareButtonClick() {
+            // まずデータを処理して、currentYearSalesDataとpreviousYearSalesDataを最新の状態にする
+            processAllInputData(); // この関数は同期的にデータを処理し、グローバル変数に格納します
+
+            if (currentYearSalesData.length === 0) {
+                showMessageBox('共有するデータがありません。当期データを入力してください。');
+                return;
+            }
+
+            showLoading("データをFirebaseに保存中...");
+            try {
+                if (!window.db || !window.userId) {
+                    throw new Error("Firebaseが初期化されていないか、ユーザーが認証されていません。");
                 }
 
-                if (currentYearSalesData.length > 0) {
-                    setupDateRange();
-                    applyFilters();
-                    document.getElementById('dashboardContent').classList.remove('hidden');
+                // Firestoreにデータを保存
+                const collectionRef = window.collection(window.db, `artifacts/${__app_id}/public/data/sales_data`);
+                const docData = {
+                    currentYearData: currentYearSalesData,
+                    previousYearData: previousYearSalesData,
+                    timestamp: new Date(),
+                    ownerId: window.userId,
+                    // フィルター設定も保存しておくと、共有時にフィルターを自動適用できる
+                    startDate: document.getElementById('startDate').value,
+                    endDate: document.getElementById('endDate').value,
+                    weekdayFilter: document.getElementById('weekdayFilter').value
+                };
+
+                let docRef;
+                // 既存の共有ドキュメントがある場合は更新、ない場合は新規作成
+                if (currentShareDocId) {
+                    docRef = window.doc(window.db, `artifacts/${__app_id}/public/data/sales_data`, currentShareDocId);
+                    await window.setDoc(docRef, docData, { merge: true }); // merge: true で既存フィールドを上書きしない
+                    console.log("Document updated with ID: ", currentShareDocId);
+                } else {
+                    docRef = await window.addDoc(collectionRef, docData);
+                    currentShareDocId = docRef.id; // 新しく作成されたドキュメントのIDを保存
+                    console.log("Document written with ID: ", docRef.id);
                 }
+
+                hideLoading();
+                showShareModal(); // 共有モーダルを表示
+            } catch (error) {
+                hideLoading();
+                console.error("Firebaseへの保存に失敗しました:", error);
+                showMessageBox(`データの保存に失敗しました: ${error.message}`);
             }
         }
 
@@ -1102,8 +1274,8 @@
 
             if (sortedPreviousData.length > 0) {
                 // 当期データと同じ日付ラベルに合わせて前年データをマッピング
+                const currentYear = new Date().getFullYear(); // 当期の日付の年を取得
                 const totalSalesPrevious = labels.map(label => {
-                    const currentYear = new Date().getFullYear(); // 当期の日付の年を取得
                     const monthDay = label.split('/');
                     const targetMonth = parseInt(monthDay[0]) - 1;
                     const targetDay = parseInt(monthDay[1]);
@@ -1114,7 +1286,6 @@
                 });
 
                 const saunaSalesPrevious = labels.map(label => {
-                    const currentYear = new Date().getFullYear();
                     const monthDay = label.split('/');
                     const targetMonth = parseInt(monthDay[0]) - 1;
                     const targetDay = parseInt(monthDay[1]);
@@ -1125,7 +1296,6 @@
                 });
 
                 const stayingSalesPrevious = labels.map(label => {
-                    const currentYear = new Date().getFullYear();
                     const monthDay = label.split('/');
                     const targetMonth = parseInt(monthDay[0]) - 1;
                     const targetDay = parseInt(monthDay[1]);
@@ -1657,8 +1827,9 @@
             paginatedData.forEach(currentItem => {
                 const row = tableBody.insertRow();
                 // 曜日によって背景色を変更
-                if (currentItem.weekday === '日' || currentItem.weekday === '土') {
-                    row.classList.add(`weekday-${weekdayOrder[currentItem.weekday]}`);
+                const dayIndex = new Date(currentItem.date).getDay(); // 0:日, 1:月, ..., 6:土
+                if (dayIndex === 0 || dayIndex === 6) { // 日曜日または土曜日
+                    row.classList.add(`weekday-${dayIndex}`);
                 }
 
                 // ヘルパー関数で前年データを取得
@@ -1808,19 +1979,15 @@
             const shareModal = document.getElementById('shareModal');
             shareModal.style.display = 'flex'; // Flexboxを使って中央揃え
 
-            // 現在のデータとフィルター設定をURLに含める
-            const compressedCurrentData = LZString.compressToEncodedURIComponent(JSON.stringify(currentYearSalesData));
-            const compressedPreviousData = LZString.compressToEncodedURIComponent(JSON.stringify(previousYearSalesData));
+            // FirebaseドキュメントIDをURLに含める
+            const shareUrl = new URL(window.location.origin + window.location.pathname);
+            shareUrl.searchParams.set('view', 'true');
+            shareUrl.searchParams.set('id', currentShareDocId); // 短いドキュメントIDを使用
+
+            // フィルター設定もURLに含める
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
             const weekday = document.getElementById('weekdayFilter').value;
-
-            const shareUrl = new URL(window.location.origin + window.location.pathname);
-            shareUrl.searchParams.set('view', 'true');
-            shareUrl.searchParams.set('current_data', compressedCurrentData);
-            if (previousYearSalesData.length > 0) {
-                shareUrl.searchParams.set('previous_data', compressedPreviousData);
-            }
             if (startDate) shareUrl.searchParams.set('start', startDate);
             if (endDate) shareUrl.searchParams.set('end', endDate);
             if (weekday && weekday !== 'all') shareUrl.searchParams.set('weekday', weekday);
